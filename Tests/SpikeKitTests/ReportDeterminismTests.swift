@@ -150,12 +150,6 @@ final class ReportDeterminismTests: XCTestCase {
         XCTAssertNil(undecided.finding)
     }
 
-    func testSizeQuantizesOnConstruction() throws {
-        let size = try Size(width: 10.00049, height: 20.00051)
-        XCTAssertEqual(size.width, 10.0, accuracy: 1e-12)
-        XCTAssertEqual(size.height, 20.001, accuracy: 1e-12)
-    }
-
     /// All six measured fields, through the same helper — none of them may
     /// format itself.
     func testLayoutReportQuantizesItsMeasuredFields() throws {
@@ -205,6 +199,15 @@ final class ReportDeterminismTests: XCTestCase {
     func testGlyphCoverageFormatsScalarsAsSortedHex() {
         let coverage = GlyphCoverage(testedCharacters: 4, missingScalars: [0x4E2D, 0x41])
         XCTAssertEqual(coverage.testedCharacters, 4)
+        XCTAssertEqual(coverage.missingCharacters, 2)
+        XCTAssertEqual(coverage.missingScalars, ["U+0041", "U+4E2D"])
+    }
+
+    /// The count and the list describe the same set, so a repeated scalar cannot
+    /// make them disagree. Reachable in principle: two distinct `Character`s can
+    /// share a first scalar (base + combining mark).
+    func testGlyphCoverageDeduplicatesMissingScalars() {
+        let coverage = GlyphCoverage(testedCharacters: 4, missingScalars: [0x4E2D, 0x41, 0x4E2D])
         XCTAssertEqual(coverage.missingCharacters, 2)
         XCTAssertEqual(coverage.missingScalars, ["U+0041", "U+4E2D"])
     }

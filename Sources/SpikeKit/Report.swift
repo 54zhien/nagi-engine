@@ -120,20 +120,6 @@ public struct ProbeOutcome: Codable, Sendable {
     }
 }
 
-public struct Size: Codable, Sendable {
-    public var width: Double
-    public var height: Double
-
-    public init(width: Double, height: Double) throws {
-        self.width = try Quantize.value(width)
-        self.height = try Quantize.value(height)
-    }
-
-    public init(_ cgSize: CGSize) throws {
-        try self.init(width: Double(cgSize.width), height: Double(cgSize.height))
-    }
-}
-
 /// One laid-out line.
 ///
 /// Two ranges, because a line consumes more than it displays:
@@ -267,21 +253,20 @@ public struct LayoutReport: Codable, Sendable {
 public struct GlyphCoverage: Codable, Sendable {
     public var testedCharacters: Int
     public var missingCharacters: Int
-    /// Sorted hex scalar values — not the characters themselves, so the report
-    /// stays readable and diffable.
-    ///
-    /// Note there is no dedup: `FontCoverage.measure` appends one entry per
-    /// `Character`, and two distinct characters can share a first scalar (base +
-    /// combining mark). No pair in the current corpus does, so the counts are
-    /// right today; see tasks/todo.md.
+    /// Sorted, deduplicated hex scalar values — not the characters themselves,
+    /// so the report stays readable and diffable.
     public var missingScalars: [String]
 
     public init(testedCharacters: Int, missingScalars: [UInt32]) {
+        // Deduplicated, so the two fields describe the same set. They could
+        // disagree: `FontCoverage.measure` appends one entry per `Character`, and
+        // two distinct characters can share a first scalar (base + combining
+        // mark). No pair in the current corpus does, which is exactly why this
+        // would have gone unnoticed until a corpus that does.
+        let unique = Set(missingScalars).sorted()
         self.testedCharacters = testedCharacters
-        self.missingCharacters = missingScalars.count
-        self.missingScalars = missingScalars
-            .sorted()
-            .map { String(format: "U+%04X", $0) }
+        self.missingCharacters = unique.count
+        self.missingScalars = unique.map { String(format: "U+%04X", $0) }
     }
 }
 

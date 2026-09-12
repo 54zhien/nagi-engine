@@ -19,6 +19,51 @@
 
 ## Review
 
+### 收尾状态（run 34674224715，commit `763e2c9`）
+
+```
+Gate 1  build ✓  test ✓  (74 tests)
+Gate 2  三次进程 ✓  fingerprint cmp ✓  artifacts ✓
+跨进程  PNG 与 fingerprint 逐字节相同；完整 JSON 因 expectedFingerprint 而不同（设计如此）
+```
+
+**7 个 probe 全部 `measured`，没有一条 `inconclusive`** —— 每个实验的有效性条件这次都满足了，所以每条都是真答案：
+
+```
+font-feature-census          measured  no     缺 halt/palt/vrt2 等 10 项
+glyph-coverage               measured  no     2/276（U+30FC, U+6771）
+kinsoku-baseline-behavior    measured  yes    默认断行未产生所测禁则违规
+kinsoku-language-tag-effect  measured  no     两臂均 0，无可测差异
+ruby-line-height             measured  yes    delta = 11.200pt（干净 fixture）
+ruby-base-font-fallback      measured  yes    检测到 base 的字体替换
+vertical-column-flow         measured  yes    407 单元 / 26 列
+```
+
+**已进入 ADR 的判断**：ADR-0005 增加 bounded-evidence 段（决策状态与实验可信度分开，架构决策不动）；ADR-0006 的「Pending Spike B」被结论替换，并写明 Nagi v1 可用 `CTTypesetter` 作候选断行 backend、最终 policy 仍归 Nagi。
+
+**Spike B 封版于 `763e2c9`。**
+
+**维护项（Gate 已稳定，后续补）**
+
+`SpikeReport` 增加 `environment` 节点 —— 至少记录 `runtime / Xcode / Swift / architecture / font hash / layoutAlgorithmVersion`，用于判断以后结果变化究竟来自代码还是环境。当前报告里 `layoutAlgorithmVersion` 一个字段都没有，ADR-0011 要求的 golden 门钉死项因此是不完整的。
+
+**已清掉（普通 cleanup）**
+
+- `Size` 死代码连同其测试删除。
+- `GlyphCoverage` 的 `missingCharacters` / `missingScalars` 改为**同集合**语义（去重），注释恢复简洁，并补了去重行为的测试。当前 corpus 无重复项，故报告与指纹不受影响。
+
+**刻意不做**
+
+不现在铺开样本矩阵。等真正遇到新的风险轴再扩，优先次序：**日文字体 → 另一套 CJK 字体 → 连续 ruby → 竖排标点 → 边界禁则 corpus**。
+
+**诊断素材，不是待修项**
+
+`東`(U+6771) 与 `ー`(U+30FC) 的字形缺失是**故意保留**的：它们是那套「被污染的测量看起来和正常测量一样」的活证据。
+
+**下一主线：Spike A** —— `Readium Locator ↔ NativeDocumentPosition` 的身份往返。
+
+### 更早的 Review
+
 ### Gate 2 第一次真实结果（2026-09-12，run 34672568307）
 
 两个 gate 全绿：`swift build` ✓、66 个测试全部执行并通过 ✓、三次进程指纹 `cmp` 一致 ✓。
