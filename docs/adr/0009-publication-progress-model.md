@@ -93,7 +93,13 @@ FB2 的 `<binary>` 内嵌 base64 图片会把字节进度严重扭曲；MOBI 压
 
 **实现的是三个轴，不是五个，而且这不是欠账。** `readiumPositions` 需要 archive entry length，而本 spike 没有 archive；`custom` 是逃生口，给它写一个实现等于凭空发明一种 metric。三个轴 —— `CanonicalTextIndexAxis` / `SourceBytesAxis` / `FixedPageOrdinalAxis` —— 各自带来自己的算术，**没有任何一个 metric 的实现是 stub**。没有注册表：哪个轴适用于哪份文档，这一轮由调用方决定，五实现注册表会有四个是空的。
 
-**metric 身份随数值一起走。** `Progression { value, metric }`，`metric` **非可选**。这不是样式：闭合本文档「metric 不写在 UI 能看见的地方」这句话，唯一的机制就是让**想要裸 `Double` 的调用点必须显式丢掉标签**，而那个丢弃点正是出问题的地方 —— 它必须被记进 `discarded`，不得默默发生。`ReadiumLocator.Locations.progression` 保持裸 `Double?`（镜像保真），转换发生在 bridge，丢弃被记录。
+**metric 身份随数值一起走。** `Progression { value, metric, scope }`，`metric` 与 `scope` **都非可选**（scope 的理由见下）。这不是样式：闭合本文档「metric 不写在 UI 能看见的地方」这句话，唯一的机制就是让**想要裸 `Double` 的调用点必须显式丢掉标签**，而那个丢弃点正是出问题的地方 —— 它必须被记录，不得默默发生。`ReadiumLocator.Locations.progression` 保持裸 `Double?`（镜像保真），转换发生在 bridge。
+
+**丢弃记成 `Observation`，不是记成字段裁定。** 初版把「metric 标签丢了」写进 `discarded` 字段表（`LocatorField.progressionMetric`），而那张表的契约是「一行一个**输入声明过**的字段」—— 输入从来没有声明过 metric 标签，bridge 才产生这个事实。后果不是措辞问题：reducer 只按字段表判，而一条 `refused` 既不是 lost 也不是 derived 也不是 uncarriable，于是 `exact` 与它自己那张表里的 `refused` 行并存，**artifact 里直接读得到的自相矛盾**。
+
+修法是把两类事实分开：`transportResolutions` 只装输入声明过的字段，`observations` 装 bridge 自己的事实，而 `OutcomeReducer` **只吃前者**。写进裸 `Double` 丢的其实是**两个**东西 —— metric 标签与 scope —— 所以是两条 observation。
+
+**`scope` 也在类型里，且两个轴本来就是 resource-scoped。** 本文档封版的结论是 `Position = 数值 + metric + scope + provenance`，而 `Progression` 长期只有前两项。`scope` 加进来之后有个必须说清的地方：`SourceBytesAxis` 除的是**该资源自己的**字节数、`FixedPageOrdinalAxis` 除的是**该资源声明的**页数（两者构造时各捕获一个资源，并在 `position.unitID == resource.href` 上把关），所以它们是 `.resource(...)`；只有 `CanonicalTextIndexAxis` 除的是文档总长，是 `.publication`。把前两者一并写成 `.publication`，在单资源文档上数字**恰好**相同 —— 而这正是「靠巧合成立」：同一个值、同一个 metric、不同的 scope 指不同的位置，类型现在拦得住这个替换。
 
 **容差由 metric 声明，不由 probe 选择**，且一律以 metric 自己的单位表示（字节 / 页 / UTF-16）。progression 空间不能用来比容差：报告的量化是三位小数（ADR-0011），那里 1e-9 的误差会被写成 `0.0` 并**制造出精确性**。
 
@@ -118,7 +124,7 @@ Position = 数值 + metric + scope + provenance
 **单独一个 `Double` 没有位置语义。** 以下五条是这份文档的核心，其余章节都是它们的推论。
 
 **一、metric 是 Position 的组成部分，不是附加 metadata。**
-`Progression { value, metric }` 里 `metric` **不可选**。这不是防御性编码：它让「取得一个裸 `Double`」变成必须**显式丢标签**的动作，而那个丢弃点正是本文档要盯的地方 —— 丢弃必须被记录，不得默认发生。
+`Progression { value, metric, scope }` 里 `metric` 与 `scope` **都不可选**（`scope` 的 `init` 参数没有默认值，理由同上：默认值等于允许调用点悄悄写错）。这不是防御性编码：它让「取得一个裸 `Double`」变成必须**显式丢标签**的动作，而那个丢弃点正是本文档要盯的地方 —— 丢弃必须被记录，不得默认发生。
 
 **二、不同 metric 的数值空间不可互换，即使底层都是 `Double`。**
 `locations.progression` 是 **resource-local**（Readium 的 `EPUBPositionsService` 每条资源一个，`native(from:)` 按 `unit.length` 反算它）；`publication progression` 是 **publication-global**。同一个 `0.5` 在两者下指不同的位置。

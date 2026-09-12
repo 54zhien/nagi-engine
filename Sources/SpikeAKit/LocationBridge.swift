@@ -22,7 +22,15 @@ public enum Resolution: Sendable, Hashable {
     /// Derived from a numeric location. The neighbourhood is right, but the
     /// offset is this bridge's arithmetic rather than anything the locator
     /// stated.
-    case approximate(NativePosition, basis: String, bound: Bound?, provenance: [FieldProvenance])
+    ///
+    /// **The basis is a type, and the guarantee travels inside it.** It used to
+    /// be a string beside an optional `Bound`, which gave one fact two
+    /// representations — and the renderer could interpret neither, because
+    /// `bound == nil` had four different causes. `RecomputeBasis.progression`
+    /// carries the bound it comes with, so a caller cannot name the channel
+    /// without the guarantee, and `clampedProgression` is a different case
+    /// rather than the same one with nothing in it.
+    case approximate(NativePosition, basis: RecomputeBasis, provenance: [FieldProvenance])
 
     /// The locator's own information admits more than one position. Readium's
     /// JavaScript produces exactly this shape: `dom.js:55-67` emits a
@@ -35,7 +43,7 @@ public enum Resolution: Sendable, Hashable {
     public var position: NativePosition? {
         switch self {
         case .structural(let position, _): return position
-        case .approximate(let position, _, _, _): return position
+        case .approximate(let position, _, _): return position
         case .ambiguous, .unresolvable: return nil
         }
     }
@@ -43,7 +51,7 @@ public enum Resolution: Sendable, Hashable {
     public var provenance: [FieldProvenance] {
         switch self {
         case .structural(_, let provenance): return provenance
-        case .approximate(_, _, _, let provenance): return provenance
+        case .approximate(_, _, let provenance): return provenance
         case .ambiguous(_, _, let provenance): return provenance
         case .unresolvable(_, let provenance): return provenance
         }
@@ -61,13 +69,12 @@ public enum Resolution: Sendable, Hashable {
     /// The channel a position was derived from, when it was derived rather than
     /// carried. The outbound side needs it: a position with no fragment to name
     /// it travels as a fraction, and only this says which one.
-    public var basis: String? {
-        if case .approximate(_, let basis, _, _) = self { return basis }
-        return nil
-    }
-
-    public var bound: Bound? {
-        if case .approximate(_, _, let bound, _) = self { return bound }
+    ///
+    /// There is no separate `bound` accessor — the bound lives inside
+    /// `.progression(bound:)`, so "which channel" and "with what guarantee"
+    /// cannot be read apart from each other and then recombined wrongly.
+    public var basis: RecomputeBasis? {
+        if case .approximate(_, let basis, _) = self { return basis }
         return nil
     }
 
@@ -89,18 +96,36 @@ public enum Resolution: Sendable, Hashable {
 /// happens instead of being performed silently.
 public struct LocatorExport: Sendable, Hashable, Codable {
     public var locator: ReadiumLocator
-    /// What this export can state about itself. It states `progressionMetric`
-    /// always, and the fate of `utf16Offset` / `nodeID` **only when it named
-    /// the node with a fragment** — a fragment points at an element, so whether
-    /// it holds the offset asked for is a fact about what was emitted. When no
-    /// fragment went out, the position travelled as a fraction and only the
-    /// resolution knows what it was re-derived from; the harness completes those
-    /// two fields from `Resolution.basis`, and this list says nothing about them.
+    /// What this export can state about the **fields it wrote**. That is the
+    /// fate of `utf16Offset` / `nodeID`, and **only when it named the node with
+    /// a fragment** — a fragment points at an element, so whether it holds the
+    /// offset asked for is a fact about what was emitted. When no fragment went
+    /// out, the position travelled as a fraction and only the resolution knows
+    /// what it was re-derived from; the harness completes those two fields from
+    /// `Resolution.basis`, and this list says nothing about them.
+    ///
+    /// **One row per field the input stated** is the contract, and it is why the
+    /// metric label is no longer in here.
     public var provenance: [FieldProvenance]
+    /// Facts the export produced about **itself**, as opposed to anything the
+    /// input stated.
+    ///
+    /// The mirror's `locations.progression` is a bare `Double?`, so writing a
+    /// number there drops two things at once — the metric label and the scope.
+    /// Those are facts about the bridge, not verdicts on a field the input gave,
+    /// and keeping them in `provenance` is what let a row read `exact` while its
+    /// own table said `refused`. They are visible in the report and **invisible
+    /// to the reducer**, which receives `provenance` and nothing else.
+    public var observations: [Observation]
 
-    public init(locator: ReadiumLocator, provenance: [FieldProvenance]) {
+    public init(
+        locator: ReadiumLocator,
+        provenance: [FieldProvenance],
+        observations: [Observation]
+    ) {
         self.locator = locator
         self.provenance = provenance
+        self.observations = observations
     }
 }
 
@@ -122,6 +147,36 @@ public enum LocationBridge {
         // lost.
         var provenance = uncarriableProvenance(locator)
 
+        /// **Every return below goes through here, and that is the point.**
+        ///
+        /// A locator can state more than one channel at once — a fragment and a
+        /// progression and a selector — and this bridge resolves by the most
+        /// precise one and returns. The channels it never consulted used to
+        /// vanish: no row, no verdict, nothing anywhere in the artifact saying a
+        /// field had been given. A row could report two fewer fields than its
+        /// input carried while the census buckets went on adding up.
+        ///
+        /// The sweep lives here rather than at each `return` because a rule that
+        /// has to be remembered thirteen times is a rule that gets forgotten
+        /// once, and the once is invisible.
+        /// A field `uncarriableProvenance` already staked keeps that verdict, and
+        /// that precedence is deliberate rather than an oversight: `.position`
+        /// and `.totalProgression` are publication-level for **every** resolution
+        /// that could be built from them, so `.documentLevel` says something
+        /// about the field while the sweep's reason would say something only
+        /// about this one resolution's route. No corpus row states both a
+        /// fragment and a position, so nothing is misattributed today — but the
+        /// first fixture that does will report `documentLevel`, not
+        /// `aMorePreciseAnchorResolvedIt`, and that is the intended answer.
+        func stated(_ bag: [LocatorField: Provenance]) -> [FieldProvenance] {
+            var complete = bag
+            for field in LocatorField.allCases where field.isStated(by: locator) {
+                if complete[field] != nil { continue }
+                complete[field] = .discarded(reason: .aMorePreciseAnchorResolvedIt)
+            }
+            return assemble(complete)
+        }
+
         let unit: DocumentUnit
         if let match = document.unit(withHref: locator.href) {
             unit = match
@@ -135,7 +190,7 @@ public enum LocationBridge {
             provenance[.href] = .discarded(reason: .hrefMatchesNoUnit)
             return .unresolvable(
                 reason: "href \(locator.href) matches no unit, and no totalProgression was supplied to fall back on",
-                provenance: assemble(provenance)
+                provenance: stated(provenance)
             )
         }
 
@@ -150,7 +205,7 @@ public enum LocationBridge {
                         nodeID: .explicitID(fragment),
                         utf16Offset: element.utf16Range.lowerBound
                     ),
-                    provenance: assemble(provenance)
+                    provenance: stated(provenance)
                 )
             }
             // A fragment that names nothing is not a resolution failure to paper
@@ -159,7 +214,7 @@ public enum LocationBridge {
             provenance[.fragments] = .discarded(reason: .fragmentNamesNothing)
             return .unresolvable(
                 reason: "fragment \"\(fragment)\" matches no element id in \(unit.href)",
-                provenance: assemble(provenance)
+                provenance: stated(provenance)
             )
         }
 
@@ -171,7 +226,7 @@ public enum LocationBridge {
                 provenance[.cssSelector] = .discarded(reason: .selectorNotUnderstood)
                 return .unresolvable(
                     reason: "cssSelector \"\(selector)\" is not a plain #id selector, which is all this spike resolves",
-                    provenance: assemble(provenance)
+                    provenance: stated(provenance)
                 )
             }
             let id = String(selector.dropFirst())
@@ -179,7 +234,7 @@ public enum LocationBridge {
                 provenance[.cssSelector] = .discarded(reason: .selectorNamesNothing)
                 return .unresolvable(
                     reason: "cssSelector \"\(selector)\" matches no element id in \(unit.href)",
-                    provenance: assemble(provenance)
+                    provenance: stated(provenance)
                 )
             }
             provenance[.cssSelector] = .carried
@@ -188,10 +243,10 @@ public enum LocationBridge {
             // enum has no case for a channel that succeeded, which is why the
             // old code's flat `"cssSelector"` entry was wrong: it made a
             // success look like a loss.
-            provenance[.fragments] = .recomputed(basis: "cssSelector", bound: nil)
+            provenance[.fragments] = .recomputed(basis: .cssSelector)
             return .structural(
                 NativePosition(unitID: unit.id, nodeID: .explicitID(id), utf16Offset: element.utf16Range.lowerBound),
-                provenance: assemble(provenance)
+                provenance: stated(provenance)
             )
         }
 
@@ -200,7 +255,7 @@ public enum LocationBridge {
                 provenance[.progression] = .discarded(reason: .unitCarriesNoText)
                 return .unresolvable(
                     reason: "\(unit.href) carries no text, so a progression has nothing to point into",
-                    provenance: assemble(provenance)
+                    provenance: stated(provenance)
                 )
             }
             // Clamped, because a progression outside 0...1 is a value Readium
@@ -217,31 +272,41 @@ public enum LocationBridge {
                 provenance[.progression] = .discarded(reason: .unitHasNoAddressableElements)
                 return .unresolvable(
                     reason: "\(unit.href) has no addressable elements",
-                    provenance: assemble(provenance)
+                    provenance: stated(provenance)
                 )
             }
-            // The clamped case keeps its own basis word. It is reachable, and
-            // flattening it into "progression" would erase the only record that
-            // the request was outside the range the field can name.
-            let basis = progression == clamped ? "progression" : "progression (clamped)"
+            // **The clamped case is its own case, not this one with the bound
+            // missing.** A request outside `0...1` names nothing, so the bridge
+            // used the boundary: nothing was asked for and nothing was met.
+            // Flattening it into `progression` would erase the only record that
+            // the request was outside the range the field can name — and the old
+            // shape, where it *was* flattened into `progression` with `bound:
+            // nil`, made every reader of that nil print "the request was outside
+            // the range" on rows where no clamp had happened at all.
+            //
             // **The bound comes from the metric, not from taste.** ADR-0009 lays
-            // this path down as bounded rather than exact, and that sentence had
-            // no carrier in the artifact until now. A clamped request has no
-            // bound to state — it named nothing — so it gets nil rather than a
-            // plausible-looking number.
-            let bound = progression == clamped
-                ? Bound(
+            // this path down as bounded rather than exact, and until this round
+            // that sentence had no carrier in the artifact. It is non-optional
+            // inside `.progression` for that reason: this path always has one.
+            let basis: RecomputeBasis
+            if progression == clamped {
+                basis = .progression(bound: Bound(
                     tolerance: CanonicalTextIndexAxis(document: document).seekTolerance,
                     unit: .canonicalTextIndex
-                )
-                : nil
-            provenance[.progression] = .recomputed(basis: basis, bound: bound)
-            provenance[.fragments] = .recomputed(basis: basis, bound: nil)
+                ))
+            } else {
+                basis = .clampedProgression
+            }
+            // **Both rows carry the same basis.** The fragment names the element
+            // the inverted offset landed in, so it is the same derivation as the
+            // offset — and it was the fragment's `bound: nil` that printed the
+            // fabricated sentence this round exists to kill.
+            provenance[.progression] = .recomputed(basis: basis)
+            provenance[.fragments] = .recomputed(basis: basis)
             return .approximate(
                 NativePosition(unitID: unit.id, nodeID: nodeID, utf16Offset: offset),
                 basis: basis,
-                bound: bound,
-                provenance: assemble(provenance)
+                provenance: stated(provenance)
             )
         }
 
@@ -255,7 +320,7 @@ public enum LocationBridge {
             provenance[.position] = .discarded(reason: .globalPositionNeedsThePositionsTable)
             return .unresolvable(
                 reason: "a global `position` (\(position)) cannot be resolved without the publication's positions table, which is document-level state rather than a coordinate",
-                provenance: assemble(provenance)
+                provenance: stated(provenance)
             )
         }
 
@@ -274,29 +339,28 @@ public enum LocationBridge {
                         )
                     },
                     reason: "the locator's information admits \(matches.count) positions; choosing between them needs quote matching, which is ReanchorService's job",
-                    provenance: assemble(provenance)
+                    provenance: stated(provenance)
                 )
             }
             if let only = matches.first {
                 // The element is named, but by the quotation rather than by any
                 // id the locator stated — the same fact by another channel.
-                provenance[.fragments] = .recomputed(basis: "text.highlight", bound: nil)
+                provenance[.fragments] = .recomputed(basis: .textHighlight)
                 return .approximate(
                     NativePosition(
                         unitID: unit.id,
                         nodeID: only.explicitID.map { NodeID.explicitID($0) } ?? .path(only.path),
                         utf16Offset: only.utf16Range.lowerBound
                     ),
-                    basis: "text.highlight",
-                    bound: nil,
-                    provenance: assemble(provenance)
+                    basis: .textHighlight,
+                    provenance: stated(provenance)
                 )
             }
         }
 
         return .unresolvable(
             reason: "the locator carries nothing this bridge can resolve: no fragment, cssSelector, progression, position or matching text",
-            provenance: assemble(provenance)
+            provenance: stated(provenance)
         )
     }
 
@@ -340,7 +404,7 @@ public enum LocationBridge {
                 : .lost
             provenance[.nodeID] = position.nodeID == .explicitID(id)
                 ? .carried
-                : .recomputed(basis: "utf16Offset", bound: nil)
+                : .recomputed(basis: .utf16Offset)
         }
         // A position that travelled as a fraction states neither field here: the
         // resolution knows what it was re-derived from, and this export does
@@ -358,13 +422,27 @@ public enum LocationBridge {
         // and **the census buckets would still sum to the number of rows**. Only
         // the value would be wrong.
         var progression: Double?
+        // Writing that bare `Double` drops **two** things, and they are recorded
+        // as two observations rather than one: the label that says what the
+        // fraction is a fraction *of*, and the scope that says how far it
+        // reaches. One row could not have said both, and a reader given only the
+        // metric would still not know the number is resource-local.
+        var observations: [Observation] = []
         if unit.length > 0 {
             let perUnit = Progression(
                 value: Double(position.utf16Offset) / Double(unit.length),
-                metric: .canonicalTextIndex
+                metric: .canonicalTextIndex,
+                scope: .resource(unit.id)
             )
             progression = perUnit.value
-            provenance[.progressionMetric] = .discarded(reason: .metricHasNowhereToGo)
+            observations.append(Observation(
+                kind: .metricDroppedToFitTheMirror,
+                described: "the mirror's locations.progression is a bare Double, so \(perUnit.metric) could not come along"
+            ))
+            observations.append(Observation(
+                kind: .scopeDroppedToFitTheMirror,
+                described: "the number written there is \(perUnit.scope.described), and no field in the mirror can say so"
+            ))
         }
 
         return LocatorExport(
@@ -380,7 +458,8 @@ public enum LocationBridge {
                 ),
                 text: ReadiumLocator.Text()
             ),
-            provenance: assemble(provenance)
+            provenance: assemble(provenance),
+            observations: observations
         )
     }
 

@@ -46,7 +46,19 @@ Quote/Context Reanchor → 解决跨版本、跨来源恢复
 
 **Spike A 的实测（2026-09-12）**
 
-- **本文件开头那句断言已由论断升级为测量。** 「缺 `AnchorValidator` 的后果比丢失更糟」原本是论证；spike 的 18 条往返里 **18 条都需要 validator 才能确认身份**，没有任何一条靠结构自证。这不是实现不足：`NativePosition` 是坐标，坐标里没有地方放「它当初凭什么被确立」。而其中唯一看起来精确往返的那条，是靠 ADR-0009 禁止用于此途的 `Double` 算回来的。
+- **本文件开头那句断言已由论断升级为测量。** 「缺 `AnchorValidator` 的后果比丢失更糟」原本是论证；spike 实测把它拆成了两行，因为**「需要 validator」与「需要 reanchor」不是一个问题的两个答案**：
+
+  ```
+  21 条往返
+  16 条产出了候选   → 16/16 有待验证的东西：15 条得到一个位置，1 条得到多个候选
+   6 条产不出位置   →  6/6  结构上做不出来，只能交给 ReanchorService
+  ```
+
+  没有任何一条靠结构自证。这不是实现不足：`NativePosition` 是坐标，坐标里没有地方放「它当初凭什么被确立」。其中唯一看起来精确往返的那条，是靠 ADR-0009 禁止用于此途的 `Double` 算回来的。
+
+  **一条同时在两行里，而且是应当的**：`quotation-repeated` 的引文在文档里出现两次，bridge 找到 **2 个候选** —— 有东西可验证（`AnchorValidator` 要做的正是在候选中挑出仍然指向同一内容的那一个），但没有**单一位置**可确认（`ReanchorService` 是它的兜底）。把「有候选」与「有位置」当成同一件事，会让这一行两边都报错。
+
+- **三层职责里，「没有候选」是一条独立的路径。** `AnchorStrategy` 产出候选 → `AnchorValidator` 验证 → 都失败才进 `ReanchorService`。中间那层的输入是**候选**，所以一条产出不了候选的往返**根本没有东西交给 validator**，它直接进第三层。第一版把「需要 validator」无条件写死成真，于是 20 条里 20 条都声称有 validator 的活要干，而其中 5 条一个候选都没产出。**仪表说它测到了，而它测的是一句构造为真的断言。**
 
 - **Publication Position 的表达能力有边界，且边界在两侧都成立。** 它能**命名一个元素**，不能**命名元素内的偏移**：`fragments` 止于元素，而唯一能承载元素内偏移的一类字段（`domRange` / `partialCfi`）**Readium 自己的生产者也不发**（`dom.js:55-67`）。因此 `native → locator → native` 丢掉元素内偏移**不是 bridge 的缺陷，是坐标系的表达极限**；要补回来只能经由 `progression`，而 ADR-0009 禁止。
   - 连带的更正：曾把「`locator(from:)` 优先发 `fragments`」记为精度上的错误取舍 —— 不成立。该函数**同时**发 `fragments` 与 `progression`；丢 offset 的是解析侧在 fragment 命中后停止下探（`native(from:)`），而那是**正确的**，因为已经没有合法通道可走。

@@ -422,13 +422,138 @@ final class IdentityTests: XCTestCase {
             unit: .canonicalTextIndex
         )
         XCTAssertTrue(
-            trip.provenance(of: .utf16Offset) == .recomputed(basis: "progression", bound: expectedBound)
+            trip.provenance(of: .utf16Offset) == .recomputed(basis: .progression(bound: expectedBound))
         )
         XCTAssertEqual(trip.provenance(of: .nodeID)?.isDerived, true)
+        // The metric label is an **observation** on the row, not a row in the
+        // field table. A table row for it made `exact` readable on a row whose
+        // own table said `refused` — the field was never the input's to state.
         XCTAssertTrue(
-            trip.provenance(of: .progressionMetric) == .discarded(reason: .metricHasNowhereToGo),
-            "the mirror's bare Double is where the metric label goes"
+            trip.observations.contains { $0.kind == .metricDroppedToFitTheMirror },
+            "the mirror's bare Double is where the metric label goes, and saying so is not a field verdict"
         )
+        XCTAssertTrue(
+            trip.observations.contains { $0.kind == .scopeDroppedToFitTheMirror },
+            "the number written there is resource-scoped, and the mirror has no field to say so"
+        )
+    }
+
+    /// **The basis is a type, and one of its cases has no row in the corpus.**
+    ///
+    /// `RecomputeBasis.utf16Offset` is reached when the export emits a fragment
+    /// naming an element whose id the position's own `nodeID` does **not** name —
+    /// a path-rung identity sitting inside an element that has one. No fixture
+    /// case does that (`native-path-anchored` sits in an anonymous paragraph, so
+    /// no fragment goes out at all), so without this the case would be vocabulary
+    /// with zero coverage.
+    ///
+    /// Covered here rather than by a new corpus row on purpose: adding a case
+    /// moves the census, and this round's whole criterion is that the census
+    /// does not move. A unit test pins the case without touching a number.
+    func testTheOffsetBasisIsReachableWhenAPathRungIdentitySitsInAnIdentifiedElement() throws {
+        let document = try document()
+        let unit = try XCTUnwrap(document.unit(withID: "OEBPS/chap1.xhtml"))
+        let identified = try XCTUnwrap(unit.canonical.element(withID: "dup"))
+
+        let trip = try RoundTripHarness.nativeToLocatorToNative(
+            NativePosition(
+                unitID: unit.id,
+                nodeID: .path(identified.path),
+                utf16Offset: identified.utf16Range.lowerBound
+            ),
+            in: document,
+            label: "native-path-inside-an-identified-element"
+        )
+
+        XCTAssertTrue(
+            trip.provenance(of: .nodeID) == .recomputed(basis: .utf16Offset),
+            "the export names the element by its id and the position named it by path, so the node came back from the offset"
+        )
+        // The offset itself is the element's start, so a fragment *can* carry
+        // it — which is what keeps this row from being a second loss.
+        XCTAssertTrue(trip.provenance(of: .utf16Offset) == .carried)
+    }
+
+    /// **`exact` is not reachable from a table containing a refusal.**
+    ///
+    /// The reducer looked for losses, derivations and uncarriable fields, and a
+    /// `.discarded` is none of the three — so it fell through to `exact`. Nothing
+    /// caught it because every row carrying a refusal was a row with **no
+    /// position**, and those are judged by their shape before any field rule
+    /// runs. The mixed locator is the first row that has both.
+    func testARefusedFieldKeepsExactOutOfReach() throws {
+        let document = try document()
+        let testCase = try XCTUnwrap(
+            SpikeACases.locatorCases.first { $0.label == "mixed-evidence-locator" }
+        )
+        let trip = try RoundTripHarness.locatorToNativeToLocator(
+            testCase.locator,
+            in: document,
+            label: testCase.label
+        )
+
+        // The fragment named the element, so this row has a position — that is
+        // the premise the test rests on, and without it the shape rule would
+        // decide the outcome and prove nothing.
+        guard case .semanticEquivalent = trip.outcome else {
+            return XCTFail("expected a semantic-equivalent verdict, got \(trip.outcome)")
+        }
+        XCTAssertTrue(
+            trip.provenance(of: .progression) == .discarded(reason: .aMorePreciseAnchorResolvedIt)
+        )
+        XCTAssertTrue(
+            trip.provenance(of: .cssSelector) == .discarded(reason: .aMorePreciseAnchorResolvedIt)
+        )
+        // Every field the locator stated has a row, and no row is missing.
+        let stated = Set(LocatorField.allCases.filter { $0.isStated(by: testCase.locator) })
+        XCTAssertEqual(Set(trip.transportResolutions.map(\.field)), stated)
+    }
+
+    /// **The flag is a measurement, not a constant.**
+    ///
+    /// It used to be written `true` unconditionally, so twenty rows out of
+    /// twenty claimed a validator's work to do — including the six that had
+    /// nothing to hand one. Every other assertion in this file checks the flag is
+    /// *true* somewhere, so putting the unconditional `true` back would change no
+    /// test at all: it would move a number in a report and nothing else. A fix
+    /// whose only witness is a human reading a detail line is the defect this
+    /// project keeps finding, so the negative case is asserted here.
+    func testARowWithNoCandidateDoesNotClaimAValidator() throws {
+        let document = try document()
+
+        // **No candidate.** The selector is richer than a plain `#id`, so the
+        // bridge refuses it rather than guessing, and a validator has nothing to
+        // confirm — it goes straight to ReanchorService.
+        let unresolvable = try RoundTripHarness.locatorToNativeToLocator(
+            ReadiumLocator(
+                href: "OEBPS/chap1.xhtml",
+                mediaType: "application/xhtml+xml",
+                locations: .init(otherLocations: ["cssSelector": .string("body > p:nth-child(3)")])
+            ),
+            in: document,
+            label: "js-shaped-complex-selector"
+        )
+        XCTAssertFalse(unresolvable.needsValidator)
+        XCTAssertNil(
+            unresolvable.validatorReason,
+            "a reason attached to a flag that is off reads as though a validator had been asked and declined"
+        )
+        XCTAssertTrue(unresolvable.needsReanchor)
+
+        // **Several candidates.** This is the row the flag is for: choosing
+        // between them is exactly a validator's work, and it is also a row with
+        // no single position — which is why it appears in both lists.
+        let ambiguous = try RoundTripHarness.locatorToNativeToLocator(
+            ReadiumLocator(
+                href: "OEBPS/chap1.xhtml",
+                mediaType: "application/xhtml+xml",
+                text: .init(highlight: SpikeAFixture.repeatedText)
+            ),
+            in: document,
+            label: "quotation-repeated"
+        )
+        XCTAssertTrue(ambiguous.needsValidator)
+        XCTAssertTrue(ambiguous.needsReanchor)
     }
 
     /// **The number written into `locations.progression` is per resource, and
@@ -470,11 +595,26 @@ final class IdentityTests: XCTestCase {
         )
 
         XCTAssertTrue(
-            exported.provenance.contains {
-                $0.field == .progressionMetric
-                    && $0.provenance == .discarded(reason: .metricHasNowhereToGo)
-            },
+            exported.observations.contains { $0.kind == .metricDroppedToFitTheMirror },
             "the label cannot come along, so the drop has to be recorded"
+        )
+        // **The scope half, and it is the new half.** The two candidates above
+        // differ by scope as well as by metric, and until this round the type
+        // could not tell them apart — the substitution would have moved this
+        // offset from 22 to 9 with every census bucket still adding up. The
+        // assertion is on the unit's own id rather than on the word "resource",
+        // because `.publication` is the specific wrong answer being excluded.
+        let scopeObservations = exported.observations.filter {
+            $0.kind == .scopeDroppedToFitTheMirror
+        }
+        XCTAssertEqual(scopeObservations.count, 1)
+        XCTAssertTrue(
+            scopeObservations[0].described.contains(unit.id),
+            "the scope has to name the resource it reaches over, or the observation says nothing"
+        )
+        XCTAssertFalse(
+            scopeObservations[0].described.contains("publication-wide"),
+            "the number written into locations.progression is resource-local, and calling it publication-wide is the substitution the type now forbids"
         )
     }
 

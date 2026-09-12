@@ -24,9 +24,11 @@ public enum LocatorField: String, Sendable, Hashable, Codable, CaseIterable {
     case unitID
     case nodeID
     case utf16Offset
-    /// The metric label the mirror's bare `Double?` has nowhere to put —
-    /// ADR-0009's gap, recorded at the point it is dropped.
-    case progressionMetric
+    // **`progressionMetric` used to be here and is now an `Observation`.**
+    // It is not a field the input stated, and putting it in a list documented
+    // as "one row per field the input stated" made `exact` reachable on a row
+    // whose own table said `refused`. A bridge fact belongs beside the transport
+    // table, not inside it.
 
     /// For notes and the report. `text` reads as "the quotation" because that
     /// is what a reader is being told about, and because a note that says
@@ -45,7 +47,39 @@ public enum LocatorField: String, Sendable, Hashable, Codable, CaseIterable {
         case .unitID: return "unitID"
         case .nodeID: return "nodeID"
         case .utf16Offset: return "utf16Offset"
-        case .progressionMetric: return "the progression's metric"
+        }
+    }
+
+    /// Whether a locator **stated** this field.
+    ///
+    /// **Defined once, here**, because two things need the answer and they must
+    /// not each have their own: the bridge, which decides what to report, and the
+    /// probe, which checks that the bridge reported everything the input said.
+    /// Before this the judgement was spread across `if locator.title != nil` /
+    /// `if !locator.text.isEmpty` / `if locator.locations.progression != nil`, so
+    /// "did the input state it?" had as many answers as there were call sites —
+    /// and a mixed locator fell between two of them and lost two fields.
+    public func isStated(by locator: ReadiumLocator) -> Bool {
+        switch self {
+        case .href:
+            // Always. The mirror's decoder requires it and throws rather than
+            // defaulting (`Locator.swift:53-59`), so a locator that exists has
+            // stated one — its presence is not a choice the producer made.
+            return true
+        case .title: return locator.title != nil
+        case .fragments: return !locator.locations.fragments.isEmpty
+        case .cssSelector: return locator.locations.cssSelector != nil
+        case .progression: return locator.locations.progression != nil
+        case .totalProgression: return locator.locations.totalProgression != nil
+        case .position: return locator.locations.position != nil
+        case .otherLocations:
+            // `cssSelector` is stored inside `otherLocations`, and it has a row
+            // of its own — counting it twice would imply a second thing was lost.
+            return locator.locations.otherLocations.keys.contains { $0 != "cssSelector" }
+        case .text: return !locator.text.isEmpty
+        // Never stated by a locator. These are facts a **Native Position** has,
+        // and they only appear in the native-first direction's table.
+        case .unitID, .nodeID, .utf16Offset: return false
         }
     }
 }
@@ -88,7 +122,13 @@ public enum DiscardReason: String, Sendable, Hashable, Codable, CaseIterable {
     case unitHasNoAddressableElements
     case globalPositionNeedsThePositionsTable
     case nothingResolvable
-    case metricHasNowhereToGo
+    /// A structural anchor named the element first, and this field was never
+    /// consulted. **Not a failure** — ADR-0004's ladder puts ids above numbers,
+    /// so an id outranking a fraction is the ladder working. It is still a
+    /// refusal rather than a carry: what the input stated here is not what came
+    /// back, and reporting nothing at all is how a mixed locator came to claim
+    /// two fewer fields than it was given.
+    case aMorePreciseAnchorResolvedIt
 
     public var described: String {
         switch self {
@@ -108,8 +148,8 @@ public enum DiscardReason: String, Sendable, Hashable, Codable, CaseIterable {
             return "a global position needs the publication's positions table, which a coordinate cannot hold"
         case .nothingResolvable:
             return "the locator carried nothing this bridge can resolve"
-        case .metricHasNowhereToGo:
-            return "the mirror's progression field is a bare Double, so the metric label cannot come along"
+        case .aMorePreciseAnchorResolvedIt:
+            return "a more precise anchor resolved the position, so this field was never consulted"
         }
     }
 }
@@ -127,15 +167,13 @@ public enum Provenance: Sendable, Hashable, Codable {
     case carried
     /// It was rebuilt at the far end from something else.
     ///
-    /// - `basis` names that something and is **always the resolution's own
-    ///   basis string**, never a literal written at a call site. The clamp is
-    ///   reachable, and `"progression (clamped)"` must not be flattened into
-    ///   `"progression"` — a fact that a text comparison once depended on.
-    /// - `bound` is the guarantee the path comes with. ADR-0009 lays the
-    ///   progression path down as **bounded rather than exact**, and until now
-    ///   that sentence had no carrier anywhere in the artifact. A path with no
-    ///   stated bound is `nil` rather than a plausible-looking number.
-    case recomputed(basis: String, bound: Bound?)
+    /// The basis is a **type**, not a string. It was a string plus an optional
+    /// `Bound`, and the renderer explained every `bound == nil` as "the request
+    /// was outside the range the field can name" — which is true of exactly one
+    /// of the five ways a field gets here. The artifact carried that sentence on
+    /// a `cssSelector` recompute, which is a fabricated explanation rather than
+    /// a terse one.
+    case recomputed(basis: RecomputeBasis)
     /// The intermediate representation has nowhere to put it. Not a bug: a
     /// coordinate cannot carry a quotation.
     case notCarriable
@@ -151,9 +189,8 @@ public enum Provenance: Sendable, Hashable, Codable {
         switch self {
         case .carried:
             return "carried"
-        case .recomputed(let basis, let bound):
-            guard let bound else { return "recomputed from \(basis)" }
-            return "recomputed from \(basis), bounded by \(bound.described)"
+        case .recomputed(let basis):
+            return "recomputed from \(basis.described)"
         case .notCarriable:
             return "nowhere to put it"
         case .documentLevel:
@@ -172,6 +209,20 @@ public enum Provenance: Sendable, Hashable, Codable {
     }
 
     public var isLost: Bool { self == .lost }
+
+    /// The locator stated it and the resolution refused it — **deliberately**,
+    /// which is why it is not a loss. It still keeps `exact` out of reach: a
+    /// field that was stated and did not come back is not a field that came
+    /// back, whatever the reason.
+    ///
+    /// This existed as a case before it existed as a question, which is how a
+    /// row reached `exact` while its own table said `refused` — the reducer
+    /// looked for losses, derivations and uncarriable fields, and a refusal is
+    /// none of the three.
+    public var isDiscarded: Bool {
+        if case .discarded = self { return true }
+        return false
+    }
 
     /// Differences this representation cannot help: it has nowhere to put the
     /// value, or the value belongs to the publication rather than the position.
@@ -238,12 +289,122 @@ public enum ResolutionShape: String, Sendable, Hashable, Codable {
     case unresolvable
     /// The position could not be written out at all, so there was no locator to
     /// resolve back.
+    ///
+    /// `producedAPosition` is false for it, which places it with `.unresolvable`
+    /// rather than apart from it: it yields no candidate, so `AnchorValidator`
+    /// has nothing to work on and the row goes to `ReanchorService` with the
+    /// rest. It used to be the one shape whose outcome was `requiresValidator`,
+    /// which put it outside both flags' rules and let the outcome and
+    /// `needsValidator` contradict each other inside one struct.
     case notExpressible
 
     /// Whether the shape is one that produced a position.
     public var producedAPosition: Bool {
         self == .structural || self == .approximate
     }
+}
+
+/// What a re-derivation was derived **from**, and the guarantee it comes with.
+///
+/// A type rather than a string because the string could not be explained: the
+/// renderer had one sentence for `bound == nil` and four quite different
+/// situations produce it. A `switch` with no `default` makes a new basis a
+/// compile error, so no explanation can ever be borrowed again.
+public enum RecomputeBasis: Sendable, Hashable, Codable {
+    /// A fraction of the unit's canonical length, inverted. `bound` is the
+    /// guarantee ADR-0009 gives this path — **bounded rather than exact** — and
+    /// it is stated in the metric's own unit.
+    ///
+    /// **Not optional.** A clamped request is a different case rather than the
+    /// same case with no bound, and every remaining route to this one carries a
+    /// bound: `seekTolerance` is non-optional in `ProgressMetricAxis`. An
+    /// optional here would be vocabulary with zero coverage — the defect this
+    /// repository has already been bitten by twice.
+    case progression(bound: Bound)
+    /// A request outside `0...1`. **A different fact from a progression without
+    /// a bound**: the bridge did not honour the request, it used the boundary,
+    /// so nothing was asked for and nothing was met — not a bound it failed.
+    case clampedProgression
+    /// A `#id` selector named the element; the way back out spells it as a
+    /// fragment.
+    case cssSelector
+    /// A quotation located the element.
+    case textHighlight
+    /// The node was recovered from the offset the position already had.
+    case utf16Offset
+
+    public var described: String {
+        switch self {
+        case .progression(let bound):
+            return "progression, bounded by \(bound.described)"
+        case .clampedProgression:
+            return "progression (clamped)"
+        case .cssSelector:
+            return "cssSelector"
+        case .textHighlight:
+            return "text.highlight"
+        case .utf16Offset:
+            return "utf16Offset"
+        }
+    }
+}
+
+/// How far a progression reaches.
+///
+/// ADR-0009's sealed conclusion is `Position = 数值 + metric + scope +
+/// provenance`, and until now only the first two were in the type. Two
+/// coordinates with the same value *and* the same metric name different places
+/// when their scopes differ — which is exactly the substitution that would have
+/// moved an offset from 22 to 9 while every census bucket still added up.
+public enum ProgressScope: Sendable, Hashable, Codable {
+    /// A fraction of the whole publication.
+    case publication
+    /// A fraction of one resource. `locations.progression` is this one, and
+    /// `LocationBridge.native(from:)` inverts it against `unit.length`.
+    ///
+    /// The identifier is still a bare `String` and has **two producers**:
+    /// `LocationBridge.locator(from:)` passes `DocumentUnit.id`, while
+    /// `SourceBytesAxis` and `FixedPageOrdinalAxis` pass the `ByteResource.href`
+    /// they captured. Those are the same identifier — a byte resource becomes a
+    /// unit whose id is its href — but they coincide because this fixture says
+    /// so, not because the type enforces it. Giving unit identity its own type
+    /// would close that, and it is a separate change with a much larger blast
+    /// radius; what this case fixes is the *scope*, which is the part that was
+    /// silently different.
+    case resource(String)
+
+    public var described: String {
+        switch self {
+        case .publication: return "publication-wide"
+        case .resource(let id): return "within \(id)"
+        }
+    }
+}
+
+/// A fact the **bridging process** produced, as opposed to something the input
+/// stated.
+///
+/// These are visible in the report and **invisible to the reducer**. The first
+/// version appended one of them to the transport table, which made a row read
+/// `exact` while its own table said a field had been refused — the model
+/// contradicting itself in the artifact.
+public struct Observation: Sendable, Hashable, Codable {
+    public var kind: ObservationKind
+    public var described: String
+
+    public init(kind: ObservationKind, described: String) {
+        self.kind = kind
+        self.described = described
+    }
+}
+
+public enum ObservationKind: String, Sendable, Hashable, Codable, CaseIterable {
+    /// `locations.progression` is a bare `Double` because that is Readium's
+    /// shape, so the label has nowhere to go — ADR-0009:73's gap.
+    case metricDroppedToFitTheMirror
+    /// The same drop, and a second fact: the number written there is
+    /// **resource-scoped**, and the axis's is publication-wide.
+    case scopeDroppedToFitTheMirror
 }
 
 /// The order every reported field list is built in.

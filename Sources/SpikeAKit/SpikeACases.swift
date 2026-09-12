@@ -82,6 +82,44 @@ enum SpikeACases {
             text: .init(after: "山谷，沉默了片刻。", before: "", highlight: "韩立望着眼前")
         )),
 
+        // **More than one channel, stated at once.** A fragment, a progression,
+        // a selector, a quotation and a title — every channel this bridge knows.
+        // A real annotation looks like this once a producer has enriched it.
+        //
+        // **The channels are not required to agree, and this is not evidence
+        // about whether they do.** A fragment names an *element*; a progression
+        // names a *point*. What the ladder decides is which channel gets
+        // consulted — the anchor, because naming an element is the more precise
+        // statement of what is meant — and the only thing this row measures is
+        // that every channel it passes over still owes the report a verdict.
+        // An earlier version of this comment claimed all five "name the same
+        // place", which the fixture does not establish and which the row does not
+        // test; a comment asserting more than its row measures is the same
+        // defect as a probe concluding `yes` on zero evidence.
+        //
+        // This is the report's only evidence for the invariant that a field the
+        // input stated cannot silently disappear. `native(from:)` resolves by the
+        // fragment and returns, and until this round the channels it never
+        // consulted produced no row at all: this locator came back as a table of
+        // rows for fewer fields than it stated, and nothing in the artifact said
+        // so. The census still added up, because a row that is missing a field
+        // looks exactly like a row whose input never had it.
+        //
+        // It is also the corpus's first row with **both** a resolved position and
+        // a refused field — which is what exposed `exact` being reachable from a
+        // table that says `refused` on one of its own rows.
+        LocatorCase(label: "mixed-evidence-locator", locator: ReadiumLocator(
+            href: "OEBPS/chap1.xhtml",
+            mediaType: "application/xhtml+xml",
+            title: "第一章",
+            locations: .init(
+                fragments: ["p1"],
+                progression: 0.25,
+                otherLocations: ["cssSelector": .string("#p1")]
+            ),
+            text: .init(after: "山谷，沉默了片刻。", before: "", highlight: "韩立望着眼前")
+        )),
+
         // What Readium's `EPUBPositionsService` actually mints: a per-resource
         // progression, a global position, and a global totalProgression.
         LocatorCase(label: "positions-service-shaped", locator: ReadiumLocator(

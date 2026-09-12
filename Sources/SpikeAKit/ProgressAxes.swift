@@ -51,7 +51,7 @@ public struct CanonicalTextIndexAxis: ProgressMetricAxis {
 
     public func progression(of position: NativePosition) -> Progression? {
         guard total > 0, let coordinate = coordinate(of: position) else { return nil }
-        return Progression(value: coordinate / Double(total), metric: metric)
+        return Progression(value: coordinate / Double(total), metric: metric, scope: .publication)
     }
 
     public func position(near progression: Double) -> NativePosition? {
@@ -118,7 +118,17 @@ public struct SourceBytesAxis: ProgressMetricAxis {
 
     public func progression(of position: NativePosition) -> Progression? {
         guard resource.byteCount > 0, let coordinate = coordinate(of: position) else { return nil }
-        return Progression(value: coordinate / Double(resource.byteCount), metric: metric)
+        // **Resource-scoped, and saying otherwise would be a lie the type now
+        // forbids.** The denominator is *this* resource's byte count — the axis
+        // captures one `ByteResource` and `coordinate(of:)` refuses a position
+        // from any other. `.publication` would be true only by the accident of a
+        // single-resource document, which is precisely the kind of coincidence
+        // that survives every census bucket while naming the wrong place.
+        return Progression(
+            value: coordinate / Double(resource.byteCount),
+            metric: metric,
+            scope: .resource(resource.href)
+        )
     }
 
     public func position(near progression: Double) -> NativePosition? {
@@ -194,7 +204,13 @@ public struct FixedPageOrdinalAxis: ProgressMetricAxis {
 
     public func progression(of position: NativePosition) -> Progression? {
         guard let ranges = pageRanges, let ordinal = coordinate(of: position) else { return nil }
-        return Progression(value: (ordinal + 0.5) / Double(ranges.count), metric: metric)
+        // Resource-scoped for the same reason as `SourceBytesAxis`: the page
+        // count is the one this resource declares.
+        return Progression(
+            value: (ordinal + 0.5) / Double(ranges.count),
+            metric: metric,
+            scope: .resource(resource.href)
+        )
     }
 
     public func position(near progression: Double) -> NativePosition? {

@@ -290,7 +290,7 @@ public enum SpikeA {
             question: "Which conversions survive a round trip, and which need a validator or a reanchor?",
             execution: roundTrips.isEmpty ? .inconclusive : .measured,
             finding: roundTrips.isEmpty ? nil : .yes,
-            detail: "\(roundTrips.count) cases: \(exact) exact, \(recomputed) recomputed-equivalent, \(semantic) semantic-equivalent, \(loses) losing fields, \(validator) blocked for another reason, \(reanchor) needing a reanchor. \(needingValidator) of them cannot confirm identity without a validator.",
+            detail: "\(roundTrips.count) cases: \(exact) exact, \(recomputed) recomputed-equivalent, \(semantic) semantic-equivalent, \(loses) losing fields, \(validator) blocked for another reason, \(reanchor) needing a reanchor. \(needingValidator) of them produced a candidate, so \(needingValidator) of them have an AnchorValidator's work to do — the rest produced none, which is why this is not \(roundTrips.count).",
             numbers: [
                 "cases": Double(roundTrips.count),
                 "exact": Double(exact),

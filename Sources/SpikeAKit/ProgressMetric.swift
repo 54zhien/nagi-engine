@@ -37,13 +37,28 @@ public enum PublicationProgressMetric: Sendable, Hashable, Codable {
 /// **drop the label on purpose**. That drop is exactly where the ADR says the
 /// trouble is, so it has to be a visible act that the harness can record rather
 /// than something that happens by default at every call site.
+///
+/// **`scope` completes ADR-0009's sealed conclusion** — `数值 + metric + scope +
+/// provenance` — of which only the first two had reached the type. Two numbers
+/// with the same value *and* the same metric name different places when their
+/// scopes differ, and `locations.progression` against
+/// `CanonicalTextIndexAxis.progression` is exactly that pair. Not two fields
+/// that happen to differ: two coordinates that would be silently swapped.
 public struct Progression: Sendable, Hashable, Codable {
     public var value: Double
     public var metric: PublicationProgressMetric
+    public var scope: ProgressScope
 
-    public init(value: Double, metric: PublicationProgressMetric) {
+    /// **`scope` has no default value, deliberately.** A default of
+    /// `.publication` would compile at every call site, including the one place
+    /// where it is wrong — `LocationBridge.locator(from:)` divides by
+    /// `unit.length`, not by the publication's length — and the substitution it
+    /// would permit is invisible: the number stays plausible, the census buckets
+    /// still sum, and only the position is wrong.
+    public init(value: Double, metric: PublicationProgressMetric, scope: ProgressScope) {
         self.value = value
         self.metric = metric
+        self.scope = scope
     }
 }
 

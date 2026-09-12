@@ -126,11 +126,12 @@ do {
     print(line())
     for trip in report.roundTrips {
         print(pad(trip.name, 52) + outcomeLabel(trip.outcome))
-        // The field table: what the input said, what came back, and what
-        // happened in between. **The two values are for a reader** — nothing
-        // derives a verdict from them; the verdict comes from the provenance in
-        // the last column, which is all the reducer ever sees.
-        for entry in trip.resolutions {
+        // The field table: one row per field the **input** stated, saying what
+        // it said, what came back, and what happened in between. **The two
+        // values are for a reader** — nothing derives a verdict from them; the
+        // verdict comes from the provenance in the last column, which is all the
+        // reducer ever sees.
+        for entry in trip.transportResolutions {
             print(
                 "      "
                     + pad(entry.field.described, 22)
@@ -138,6 +139,13 @@ do {
                     + pad(entry.resolved ?? "—", 14)
                     + entry.provenance.described
             )
+        }
+        // Facts about the **bridge**, not verdicts on the input's fields. Marked
+        // `~` and kept below the table: they were once rows in it, and a row
+        // reading `refused` for a field the input never stated is what made
+        // `exact` look like a contradiction of a row's own table.
+        for observation in trip.observations {
+            print("      ~ \(observation.described)")
         }
         if case .recomputedEquivalent(let notes) = trip.outcome {
             for note in notes { print("      · \(note)") }
@@ -159,14 +167,24 @@ do {
     print(line())
     print("IDENTITY")
     print(line())
-    print("needs a validator   \(report.roundTrips.filter(\.needsValidator).count) of \(report.roundTrips.count) cases")
-    print("  A Native Position is a coordinate. It has nowhere to keep the quotation that")
-    print("  justified it, so no conversion through one can confirm it still names the same")
-    print("  content. That is AnchorValidator's job, and this is the count that proves it.")
+    // **Two lines, because there are two questions and the flags do not nest.**
+    // This used to print one number — "needs a validator: 20 of 20" — which was
+    // true by construction rather than by measurement: `refused` set the flag
+    // unconditionally, so rows that resolved to nothing claimed a validator's
+    // work to do when they had nothing to hand one.
+    print("\(report.roundTrips.count) cases")
+    print("produced a candidate   \(report.roundTrips.filter(\.needsValidator).count)")
+    print("  Either one position came back and something has to confirm it still names the")
+    print("  same content, or several did and something has to choose between them. A Native")
+    print("  Position is a coordinate, and a coordinate has nowhere to keep the quotation")
+    print("  that justified it — that is AnchorValidator's job, and this is what proves it.")
     print("")
-    print("needs a reanchor    \(report.roundTrips.filter(\.needsReanchor).count) of \(report.roundTrips.count) cases")
-    print("  These are the conversions that cannot be made from structure at all — the only")
-    print("  way back is fuzzy text matching, which is ReanchorService's job.")
+    print("produced no position   \(report.roundTrips.filter(\.needsReanchor).count)")
+    print("  These cannot be made from structure at all, so a validator has nothing to")
+    print("  validate and the only way back is fuzzy text matching — ReanchorService's job.")
+    print("")
+    print("  One row is in both lists on purpose: the ambiguous locator produced candidates")
+    print("  to choose between and no single position to confirm.")
     print("")
 
     print(line())

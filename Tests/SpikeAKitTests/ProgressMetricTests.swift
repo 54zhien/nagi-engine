@@ -48,6 +48,41 @@ final class ProgressMetricTests: XCTestCase {
         )
     }
 
+    /// **Every axis states how far its fraction reaches, and two of the three
+    /// reach one resource only.**
+    ///
+    /// `SourceBytesAxis` and `FixedPageOrdinalAxis` divide by the byte count and
+    /// the page count of the single `ByteResource` they captured — each guards
+    /// `position.unitID == resource.href` before answering — so calling their
+    /// fraction publication-wide would be true only by the accident of a
+    /// one-resource document. `CanonicalTextIndexAxis` divides by the document's
+    /// total and really is publication-wide.
+    ///
+    /// Before `scope` existed the type could not tell those apart, and the two
+    /// numbers have the same shape. That is the substitution
+    /// `testTheProgressionWrittenIntoTheLocatorIsPerResource` guards from the
+    /// other end: there the axis and the mirror disagree over one position, here
+    /// two axes disagree over what they are a fraction *of*.
+    func testEachAxisStatesTheScopeItsFractionReaches() throws {
+        let document = try document()
+        let resource = byteResource()
+        let position = try XCTUnwrap(resource.position(atUTF16: 3))
+
+        let atPublication = CanonicalTextIndexAxis(document: document).progression(
+            of: NativePosition(unitID: "OEBPS/chap1.xhtml", nodeID: .path([]), utf16Offset: 0)
+        )
+        XCTAssertTrue(atPublication?.scope == .publication)
+
+        XCTAssertTrue(
+            SourceBytesAxis(resource: resource).progression(of: position)?.scope
+                == .resource(resource.href)
+        )
+        XCTAssertTrue(
+            FixedPageOrdinalAxis(resource: resource).progression(of: position)?.scope
+                == .resource(resource.href)
+        )
+    }
+
     // MARK: - CanonicalTextIndexAxis
 
     /// The coordinate at a unit's start is the sum of the lengths before it.

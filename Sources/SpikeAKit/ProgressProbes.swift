@@ -88,8 +88,8 @@ enum ProgressProbes {
             return "a global position needs the publication's positions table, which a coordinate cannot hold"
         case .nothingResolvable:
             return "the locator carried nothing this bridge can resolve"
-        case .metricHasNowhereToGo:
-            return "the mirror's progression field is a bare Double, so the metric label cannot come along"
+        case .aMorePreciseAnchorResolvedIt:
+            return "a structural anchor resolved the position first, so this field was never consulted"
         }
     }
 
@@ -489,7 +489,7 @@ enum ProgressProbes {
     /// Whether the artifact says where each number came from — the question this
     /// whole harness exists to ask.
     ///
-    /// Three parts, and they are not equally strong. Each is labelled:
+    /// Four parts, and they are not equally strong. Each is labelled:
     ///
     /// **(a) Falsifiable: the metric label is never dropped in silence.** Every
     /// number written into `locations.progression` must both be recorded as
@@ -498,6 +498,10 @@ enum ProgressProbes {
     /// reports which one it found. The falsifier is the defect this repository
     /// already has an instance of: a metric that does not match the field it was
     /// written into.
+    /// The drop is read from the export's **observations**, where it now lives.
+    /// Writing a bare `Double` drops the scope as well, so that is checked in the
+    /// same breath — a vocabulary item nothing asserts is the same zero-coverage
+    /// defect one level up.
     ///
     /// **(b) Falsifiable: `.carried` needs a carrier.** If a row says an offset
     /// travelled, then the locator that came back must actually have somewhere to
@@ -513,7 +517,7 @@ enum ProgressProbes {
     ///
     /// `unitID` is deliberately **not** covered, and the reason is in the report
     /// rather than in a comment nobody reads: `unitID == .carried` is reachable
-    /// under `Resolution.approximate` today, and it is a tautology of the same
+    /// under an `.approximate` resolution today, and it is a tautology of the same
     /// kind — `locator(from:)` builds the href from the unit and `native(from:)`
     /// reads it back to that same unit. It is the field that was deleted for
     /// being unable to vary, under another name. Excluding it silently is how the
@@ -524,6 +528,23 @@ enum ProgressProbes {
     /// without a word defined for it is a `no` that names the word. This is
     /// weaker than the outcome census in `identityRoundTripProbe` — a count of
     /// names cannot partition rows — and it is not dressed up as one.
+    ///
+    /// **(d) Falsifiable: the field table accounts for what the input stated.**
+    /// Two clauses: every field `LocatorField.isStated(by:)` says the locator
+    /// gave has a row, and every row for a field the locator never gave is a
+    /// `.recomputed` **derivation** rather than a **verdict**.
+    ///
+    /// The second clause is the hole this round was opened for: `progressionMetric`
+    /// was a `.discarded` row in a table documented as "one row per field the
+    /// input stated", for a field no input ever stated — and because the reducer
+    /// never read `.discarded`, a row could report `exact` with that row sitting
+    /// in its own table. The first clause is the one the mixed locator violates:
+    /// a channel that names the element and returns leaves the channels it passed
+    /// over with no row at all.
+    ///
+    /// Neither shows up in a count. A row missing a field is indistinguishable
+    /// from a row whose input never had one, which is why this arm counts
+    /// coverage — `statedFieldRows` — and not just violations.
     static func provenanceHonesty(_ document: Document) throws -> ProbeOutcome {
         let roundTrips = try SpikeACases.all(document)
         let nativeCases = SpikeACases.nativeCases(document)
@@ -533,6 +554,7 @@ enum ProgressProbes {
         let publicationAxis = CanonicalTextIndexAxis(document: document)
         var progressionRows = 0
         var unrecordedMetric = 0
+        var unrecordedScope = 0
         var perUnitMismatches = 0
         var publicationLevelValues = 0
         var writtenExample: Double?
@@ -544,11 +566,22 @@ enum ProgressProbes {
                   let written = exported.locator.locations.progression
             else { continue }
             progressionRows += 1
-            let recorded = exported.provenance.contains {
-                $0.field == .progressionMetric
-                    && $0.provenance == .discarded(reason: .metricHasNowhereToGo)
+            // The drop is an **observation** now, not a row in the field table —
+            // the table holds what the input stated, and the input never stated
+            // a metric label. Reading it from there is what makes this arm
+            // checkable at all: as a row it was indistinguishable from a verdict.
+            let recordedMetric = exported.observations.contains {
+                $0.kind == .metricDroppedToFitTheMirror
             }
-            if !recorded { unrecordedMetric += 1 }
+            if !recordedMetric { unrecordedMetric += 1 }
+            // **The scope is checked as well, and not for symmetry's sake.** It
+            // is the second thing the bare `Double` drops, and a vocabulary item
+            // that nothing asserts is the zero-coverage defect this probe exists
+            // to catch — one level up, in the probe's own vocabulary.
+            let recordedScope = exported.observations.contains {
+                $0.kind == .scopeDroppedToFitTheMirror
+            }
+            if !recordedScope { unrecordedScope += 1 }
             guard let unit = document.unit(withID: testCase.position.unitID) else { continue }
             let perUnit = Double(testCase.position.utf16Offset) / Double(unit.length)
             let atPublicationLevel = publicationAxis.progression(of: testCase.position)?.value
@@ -606,10 +639,59 @@ enum ProgressProbes {
         var discardedFields = 0
         var reasonsSeen: Set<String> = []
         for trip in roundTrips {
-            for entry in trip.resolutions {
+            for entry in trip.transportResolutions {
                 guard case .discarded(let reason) = entry.provenance else { continue }
                 discardedFields += 1
                 reasonsSeen.insert(explain(reason))
+            }
+        }
+
+        // ---- (d) every field the input stated is accounted for ----
+        //
+        // Two clauses, and the second is the one that catches the defect this
+        // round opened with:
+        //
+        //   1. a field `isStated(by:)` says the locator gave **must have a row**;
+        //   2. a row for a field the locator never gave must be a
+        //      **derivation** — `.recomputed`, the bridge saying how it built
+        //      something — and never a **verdict** on the input's field.
+        //
+        // The metric label was clause 2's violation: a `.discarded` row appended
+        // to a table documented as "one row per field the input stated", for a
+        // field the input had never heard of. The mixed locator is clause 1's.
+        // Neither showed up in any count — a row missing a field looks exactly
+        // like a row whose input never had one.
+        //
+        // `isStated(by:)` is the bridge's own function, deliberately — and what
+        // that buys has to be stated precisely, because the obvious claim is
+        // false. **This arm cannot catch a wrong definition of "the input stated
+        // it"**: it consumes the same function the bridge does. What it catches
+        // is a return path that forgot the sweep — a field the rule says was
+        // given, with no row accounting for it. A second, independent definition
+        // would not fix that either: it would check the copy rather than the
+        // rule, and the two would have to be kept in step by hand.
+        //
+        // It runs on the locator-first census only. The native-first direction
+        // cannot have this check as written, because `isStated(by:)` answers
+        // `false` for `unitID` / `nodeID` / `utf16Offset` — those are facts a
+        // Native Position has, and a locator never states them.
+        var statedFieldRows = 0
+        var missingFields = 0
+        var unexplainedExtraFields = 0
+        // Hoisted rather than inlined into `zip`. `try` next to an argument that
+        // is itself a call is the shape `tasks/lessons.md` records costing this
+        // package a CI run: `try` may not appear inside a non-assignment
+        // operator's right-hand side.
+        let locatorCases = SpikeACases.locatorCases
+        let locatorTrips = try SpikeACases.locatorFirst(document)
+        for (testCase, trip) in zip(locatorCases, locatorTrips) {
+            let reported = Set(trip.transportResolutions.map(\.field))
+            for field in LocatorField.allCases where field.isStated(by: testCase.locator) {
+                statedFieldRows += 1
+                if !reported.contains(field) { missingFields += 1 }
+            }
+            for entry in trip.transportResolutions where !entry.field.isStated(by: testCase.locator) {
+                if !entry.provenance.isDerived { unexplainedExtraFields += 1 }
             }
         }
 
@@ -621,30 +703,36 @@ enum ProgressProbes {
         // it is the same entry point the monotonicity probe uses, rather than a
         // second hand-rolled ternary.
         let (execution, finding) = ProbeEvidence.conclude(
-            observed: min(carriedRows, progressionRows),
-            violations: unrecordedMetric + perUnitMismatches + publicationLevelValues + unbacked
+            observed: min(carriedRows, progressionRows, statedFieldRows),
+            violations: unrecordedMetric + unrecordedScope + perUnitMismatches
+                + publicationLevelValues + unbacked + missingFields + unexplainedExtraFields
         )
 
 
         return try ProbeOutcome(
             name: "progress-provenance",
-            question: "Does the artifact say where each number came from, and refuse to call a rebuilt value carried?",
+            question: "Does the artifact say where each number came from, refuse to call a rebuilt value carried, and account for every field the input stated?",
             execution: execution,
             finding: finding,
             detail: """
             (a) \(progressionRows) row(s) wrote into locations.progression: \(unrecordedMetric) without recording the dropped metric, \
+            \(unrecordedScope) without recording that the number is resource-scoped rather than publication-wide, \
             \(perUnitMismatches) not the per-resource fraction, \(publicationLevelValues) that are the publication-level number instead. \
             The first such row wrote \(decimal(writtenExample)) against a per-resource \(decimal(perUnitExample)) \
             and a publication-level \(decimal(publicationExample)) — the two candidates differ, which is what makes this checkable. \
             (b) \(carriedRows) of \(carriedRows + uncarriedRows) native-first rows call the offset carried; \(unbacked) of those have nothing in the locator that could have carried it. \
             unitID is excluded on purpose: locator(from:) builds the href from the unit and native(from:) reads it back to that same unit, so a verdict on it cannot vary — the defect the href field was deleted for, under another name. \
             (c) \(discardedFields) discarded field(s) across the census, in \(reasonsSeen.count) distinct refusal(s). \
-            Falsified by writing the publication-level fraction into the field, and by a generous carried — which is what reported native-path-anchored as exact.
+            (d) \(statedFieldRows) stated field(s) across the locator-first census: \(missingFields) with no row at all, \
+            and \(unexplainedExtraFields) row(s) for a field the input never stated that are a verdict rather than a derivation. \
+            Falsified by writing the publication-level fraction into the field, by a generous carried — which is what reported native-path-anchored as exact — \
+            and by a channel that resolves first and says nothing about the channels it passed over.
             """,
             numbers: [
                 "roundTrips": Double(roundTrips.count),
                 "progressionRows": Double(progressionRows),
                 "unrecordedMetric": Double(unrecordedMetric),
+                "unrecordedScope": Double(unrecordedScope),
                 "perUnitMismatches": Double(perUnitMismatches),
                 "publicationLevelValues": Double(publicationLevelValues),
                 "writtenProgression": writtenExample ?? 0,
@@ -654,7 +742,10 @@ enum ProgressProbes {
                 "carriedOffsetRows": Double(carriedRows),
                 "unbackedCarriedRows": Double(unbacked),
                 "discardedFields": Double(discardedFields),
-                "distinctRefusals": Double(reasonsSeen.count)
+                "distinctRefusals": Double(reasonsSeen.count),
+                "statedFieldRows": Double(statedFieldRows),
+                "missingStatedFields": Double(missingFields),
+                "unexplainedExtraFields": Double(unexplainedExtraFields)
             ]
         )
     }

@@ -33,7 +33,13 @@ public enum OutcomeReducerError: Error, CustomStringConvertible {
 public enum OutcomeReducer {
 
     /// - Parameters:
-    ///   - provenances: what happened to each field the input stated.
+    ///   - transport: what happened to each field the input stated — and, by
+    ///     construction, **nothing else**. `RoundTrip.transportResolutions`
+    ///     projected through `provenanceOnly`, which drops the two values a
+    ///     reader sees; the bridge's own `observations` are a different type in a
+    ///     different property, so they cannot arrive here even by mistake. A
+    ///     metric label that had no business in this list is what let a row read
+    ///     `exact` over its own `refused` row.
     ///   - shape: how the conversion went. Not a field, so it cannot arrive
     ///     through the projection — and the rules need it, because "the locator
     ///     admitted two positions" is not the fate of any one field.
@@ -43,7 +49,7 @@ public enum OutcomeReducer {
     ///     present.
     ///   - row: names the row in an error. Never part of a verdict.
     public static func reduce(
-        _ provenances: [FieldProvenance],
+        _ transport: [FieldProvenance],
         shape: ResolutionShape,
         refusalReason: String?,
         row: String
@@ -54,29 +60,53 @@ public enum OutcomeReducer {
         if !shape.producedAPosition {
             let reason = refusalReason
                 ?? "\(row) could not be resolved (\(shape.rawValue)) and no reason was recorded"
-            if shape == .notExpressible {
-                return .requiresValidator(reason: reason)
-            }
+            // **Every shape that produced no position goes to ReanchorService**,
+            // `.notExpressible` included. That last one used to return
+            // `.requiresValidator` — a catch-all in a vocabulary whose other
+            // rules are all about fields, chosen for the one shape that has no
+            // fields to rule on.
+            //
+            // What a validator works on is a **candidate**, and this shape
+            // produces none: the position could not be written out at all, so
+            // there is nothing to confirm. Once `needsValidator` stopped being
+            // written unconditionally, that outcome and that flag disagreed on
+            // this shape — one struct claiming a validator was needed and not
+            // needed in the same object. The pipeline's own rule settles it:
+            // AnchorStrategy → AnchorValidator → ReanchorService, and a step with
+            // no input from the step before it is skipped.
             return .requiresReanchor(reason: reason)
         }
 
-        guard !provenances.isEmpty else {
+        guard !transport.isEmpty else {
             throw OutcomeReducerError.noEvidence(shape: shape, row: row)
         }
 
-        let lost = provenances.filter { $0.provenance.isLost }
+        let lost = transport.filter { $0.provenance.isLost }
         if !lost.isEmpty {
             return .loses(fields: sortedFields(lost.map(\.field)).map(\.described))
         }
 
-        let derived = provenances.filter { $0.provenance.isDerived }
+        let derived = transport.filter { $0.provenance.isDerived }
         if !derived.isEmpty {
             return .recomputedEquivalent(notes: derivedNotes(derived))
         }
 
-        let uncarried = provenances.filter { $0.provenance.isUncarriable }
-        if !uncarried.isEmpty {
-            return .semanticEquivalent(notes: uncarriedNotes(uncarried))
+        // **A refusal is not a carry, and this step is the difference.** Without
+        // it `.discarded` fell through every filter above and landed on `exact`,
+        // so a row could report `exact` while its own field table said
+        // `refused` — the same contradiction that started this round, entering
+        // through a door nobody had tried. It stayed hidden because every row
+        // carrying a `.discarded` field was a row with no position, and those
+        // are judged by their shape above and never reach these rules at all.
+        //
+        // It sits with the uncarriable fields rather than with the losses
+        // because a refusal is intended: `loses` means dropped and it should not
+        // have been.
+        let notCarried = transport.filter {
+            $0.provenance.isUncarriable || $0.provenance.isDiscarded
+        }
+        if !notCarried.isEmpty {
+            return .semanticEquivalent(notes: notCarriedNotes(notCarried))
         }
 
         return .exact
@@ -89,28 +119,54 @@ public enum OutcomeReducer {
     /// that nothing travelled.
     private static func derivedNotes(_ derived: [FieldProvenance]) -> [String] {
         derived.map { entry in
-            guard case .recomputed(let basis, let bound) = entry.provenance else {
+            guard case .recomputed(let basis) = entry.provenance else {
                 return "\(entry.field.described) was rebuilt at the far end rather than carried"
             }
-            let head = "\(entry.field.described) came back by way of \(basis), not carried: the locator named no position inside the unit, so the bridge derived one"
-            guard let bound else {
-                return head
-                    + " — and no bound is stated for that path, because the request was outside the range the field can name, so the bridge used the boundary instead of honouring it"
-            }
-            return head
-                + " — and only within \(bound.described), because ADR-0009 lays that path down as bounded rather than exact. An equal number is not evidence here: the inversion is exact for every offset this fixture can reach, so the equality could never have failed"
+            return "\(entry.field.described) " + explanation(of: basis)
         }
     }
 
-    private static func uncarriedNotes(_ uncarried: [FieldProvenance]) -> [String] {
-        uncarried.map { entry in
+    /// **A `switch` with no `default`, over a type rather than over a string.**
+    ///
+    /// Every one of these sentences used to be chosen by `bound == nil`, which
+    /// four different situations produce — so the artifact printed "the request
+    /// was outside the range the field can name" on a row where the bridge had
+    /// recomputed a fragment from a `cssSelector` and no request had been out of
+    /// range at all. A fabricated explanation is worse than a terse one. A new
+    /// basis is now a compile error here, and no case can borrow its
+    /// neighbour's sentence.
+    private static func explanation(of basis: RecomputeBasis) -> String {
+        switch basis {
+        case .progression(let bound):
+            return "came back by way of the progression, not carried: the locator named no position inside the unit, so the bridge inverted a fraction to derive one — and only within \(bound.described), because ADR-0009 lays that path down as bounded rather than exact. An equal number is not evidence here: the inversion is exact for every offset this fixture can reach, so the equality could never have failed"
+        case .clampedProgression:
+            return "came back by way of a clamped progression, not carried: the request was outside 0...1, so the bridge used the boundary rather than honouring it. Nothing was asked for and nothing was met — which is why this path states no guarantee, and why the numbers agreeing is not the seek succeeding"
+        case .cssSelector:
+            return "came back by way of the cssSelector the locator stated: a selector names an element, and a fragment is how the way back out spells that same naming. Nothing was compared with anything"
+        case .textHighlight:
+            return "came back by way of the quotation: the element it matched is named, and a fragment is how the way back out spells it. What travelled is the element, not the text — a coordinate has nowhere to keep a quotation"
+        case .utf16Offset:
+            return "was derived from the offset the position already had, so it names the element that offset sits in rather than the offset itself"
+        }
+    }
+
+    /// **No `default`.** Its sibling above is exhaustive on purpose, so that a
+    /// new basis is a compile error; this one ended in a catch-all that would
+    /// swallow a new `Provenance` case and print a sentence naming neither the
+    /// case nor a reason. The four cases the filter excludes are now listed and
+    /// say the only true thing about them — that they should not be here —
+    /// rather than inventing a verdict for a field that is in neither list.
+    private static func notCarriedNotes(_ notCarried: [FieldProvenance]) -> [String] {
+        notCarried.map { entry in
             switch entry.provenance {
             case .notCarriable:
                 return "\(entry.field.described) did not come back — a Native Position is a coordinate, and a coordinate has nowhere to keep it"
             case .documentLevel:
                 return "\(entry.field.described) belongs to the publication rather than to the coordinate"
-            default:
-                return "\(entry.field.described) did not come back"
+            case .discarded(let reason):
+                return "\(entry.field.described) did not come back — refused: \(reason.described)"
+            case .carried, .recomputed, .lost:
+                return "\(entry.field.described) is \(entry.provenance.described), which is not a field that failed to come back — the filter above and this switch have drifted apart"
             }
         }
     }

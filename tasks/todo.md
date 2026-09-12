@@ -56,12 +56,49 @@ utf16Offset   22   22   recomputed from progression, bounded by 0.5 canonicalTex
 
 **Python 机械替换少留了一个 `}`**，`ProgressMetricTests.swift` open 31 / close 30，测试 target 编译不过。编译面审查代理**看不见它**（它读 diff，EOF 缺右括号在 diff 里不可见）。已写进 `lessons.md`：用脚本动过 Swift 源文件，推之前逐文件数括号。
 
-### 第二次：两个零覆盖词汇定案
+### 第二次：修测量仪器（六项）—— **已改完，待推 CI**
 
-- [ ] 补 `native-position-in-a-unit-that-no-longer-exists`（给 `requiresValidator` 覆盖）—— **但这不是实验**：`needsReanchor` 写死成 `false`，它不可能落进 `requiresReanchor`；真正的判断来自用例含义（unit 没了需要的是重锚）
-- [ ] `requiresValidator` 并入 `requiresReanchor`；词汇 6 → 5
-- [ ] `approximated` 删除，ADR-0009 的「有界」挂到 `recomputed` 的 `bound`（**已提前落地**）
-- [ ] `docs/adr/0004:49` 的「18 条」计数更新（今天 20）
+计划全文：`C:\Users\Azusa\.claude\plans\immutable-jingling-dragonfly.md`；本次会话的计划与**四处修正**（下面「修正」段）见 `C:\Users\Azusa\.claude\plans\inherited-imagining-shore.md`。
+
+- [x] **1** `RoundTrip.transportResolutions`（输入声明过的字段）与 `observations`（桥自身的事实）分开，**reducer 只吃前者** —— 现在 `exact` 与它自己的定义矛盾：`id-anchored` 报 `exact`，而它表里一行写着 `refused: …`
+- [x] **2** `Progression` 加 `scope`（`.publication` / `.resource(String)`）—— ADR-0009 封版写了「数值 + metric + scope + provenance」，而类型里只有前两个；上一轮抓到的那个替换，类型至今拦不住
+- [x] **3** 无 candidate 的六行 `needsValidator` 应为 **false**（现在写死 true，20/20；那六行没有东西可 validate）
+- [x] **4** `RecomputeBasis` 类型化 —— renderer 现在把每个 `bound == nil` 都解释成「请求越界被 clamp」，而 `js-shaped-selector` 的 artifact 里就印着这句**假话**
+- [x] **5** `mixed-evidence-locator` fixture + 不变量「输入声明的字段不得静默消失」（`native(from:)` 命中 fragment 就提前 return，`progression` / `cssSelector` 会缺席）；「声明了它」只定义一次（`LocatorField.isStated(by:)`）
+- [x] **6** `refused()` 的两列值渲染不出来（`js-shaped-complex-selector  href  —  —  carried`）
+- [x] ADR-0004 / 0009 同步（用户拍板：两份都改）
+- [x] 推之前必跑 ① 全仓库 `{` / `}` 逐文件平衡 → **33 文件 / 0 问题**（脚本见 `%TEMP%\bracecheck.py`）
+- [ ] 推之前必跑 ② 独立代理核编译面与桶位 → **进行中**
+- [ ] 推 CI，读实际读数
+
+#### 执行前拍板 / 修正（计划文件内部有四处自相矛盾，以此为准）
+
+1. **用户拍板**：`needsValidator` 按「产生过 **candidate**」判 —— `.ambiguous` 的 `quotation-repeated` 计入（它产出 2 个候选，且 locator 带着 `text.highlight`，validator 有东西可用）。
+2. **用户拍板**：`Resolution.approximate` 一起类型化（携带 `RecomputeBasis`，删 `Resolution.bound`），避免 String 与 enum 两份真相并存。
+3. **用户拍板**：ADR-0004 与 0009 本轮一并更新。
+4. **修正一（真 bug，原计划未发现）**：`OutcomeReducer` 的四步 `lost → derived → uncarriable → exact` **对 `.discarded` 没有分支**，所以 `exact` 能从「表里写着 `refused`」的行上得出。今天没有一行暴露它，因为带 `.discarded` 的行全是 `requiresReanchor`（按 shape 判，不进字段规则）。`mixed-evidence-locator` 是第一行既有位置、又有 refused 字段的用例。修法：加一步 `.discarded` 落进 `semanticEquivalent`（拒绝是**有意**的差异，不是 `loses`）。**对既有一行影响为零**（已逐行走过 14 个 `finish()` 行）。
+5. **修正二**：原计划 §二「三个轴一律返回 `.publication`」是错的 —— `SourceBytesAxis` 除的是**该资源**的字节数、`FixedPageOrdinalAxis` 除的是**该资源声明的**页数，本来就是 resource-scoped。照写会让类型说假话。
+6. **修正三**：`RecomputeBasis.progression` 的 `bound` **不可选**。`.clampedProgression` 独立成 case 后，未 clamp 的路径永远有 bound（`seekTolerance` 在协议里非可选），可选就是零覆盖词汇。
+7. **修正四**：桶位判据重述为「**20 个旧行逐个不动** + 新增第 21 行单独预测」。新行落 **`semanticEquivalent`**（原计划预测 `recomputedEquivalent` 也不对：它没有任何字段被重算，fragment 命中即 structural）。
+
+#### 本次新增的两处覆盖
+
+- `RecomputeBasis.utf16Offset` 在语料里原本**零覆盖**（`native-path-anchored` 落在匿名段落里，不发 fragment）。已用一个**单元测试**钉住，不新增语料行 —— 加行会动 census，而本轮的判据就是 census 不动。
+- `ObservationKind.scopeDroppedToFitTheMirror` 若无 probe 断言就是零覆盖词汇；`provenanceHonesty` 的 (a) 现在两条 observation 都查。
+
+**判据**：**20 个旧行的桶逐个不动**（5/5/1/3/6/0）；第 21 行预测 `semanticEquivalent` → `semantic` 1→2。
+**预期会变的**：`needsValidator` 20/20 → **16/21**；`needsReanchor` 6/20 → 6/21；`progress-provenance` 的 (c) `discardedFields` 19 → **7**、`distinctRefusals` 5 → 5。
+
+### 第三次：两个零覆盖词汇定案
+
+- [ ] `requiresValidator` 并入 `requiresReanchor`；词汇 6 → 5。**第二次推送已让这个 case 变成可证明的不可达**（reducer 对一切产不出位置的 shape 都返回 `requiresReanchor`，`refused()` 的 `needsReanchor` 也去掉了 `.notExpressible` 例外），所以 `numbers["requiresValidator"]` 是一个**没有任何测量能推动的数** —— 留着它就是本仓库点名过的「报告里出现没有测量在用的数」。删。
+- [ ] 补 `native-position-in-a-unit-that-no-longer-exists`。**前提已随第二次推送反转**：原文写「`needsReanchor` 写死成 `false`，它不可能落进 `requiresReanchor`」，而现在 `.notExpressible` **就是**落 `requiresReanchor` 且 `needsReanchor == true`。所以这一条不再是「给 `requiresValidator` 覆盖」，而是给 `.notExpressible` 这条路径**第一次**一个可观测的行 —— 它今天仍然零覆盖。
+- [ ] **零覆盖词汇清点**（第二次推送的审查代理列出，均非本轮引入）：`DiscardReason.nothingResolvable` **全仓库从不构造**（末尾那个 `unresolvable` 不为它写行，也没有对应的 `LocatorField`），而 `ProgressProbes.explain` 为它手写了文案；`selectorNamesNothing` / `unitCarriesNoText` / `unitHasNoAddressableElements` 由 bridge 构造但语料不可达（枚举 9 个 case，census 只走到 5 个）；`ObservationKind: CaseIterable` 从未被枚举；`ProgressScope.publication.described`（「publication-wide」）只被一个**否定**断言用到，不进任何 artifact 路径。arm (c) 按设计看不见这些（「名字的计数不能分划行」）。
+- [x] `docs/adr/0004:49` 的「18 条」计数更新 —— **第二次推送已做**（改成实测两行式：21 条 / 16 条产出候选 / 6 条产不出位置）。
+
+**已在本轮代码里写明的两处「已知且接受」**（不是欠账，是不改）：
+- `uncarriableProvenance` 先占下的字段（`.position` / `.totalProgression`）保持 `.documentLevel`，扫尾不覆盖它 —— 那个裁定说的是**字段本身**，扫尾的理由只说**这一次解析的路线**，前者更强。语料里没有同时声明 fragment 与 position 的行。
+- `ProgressScope.resource(String)` 有**两个生产者**（bridge 传 `DocumentUnit.id`，两个资源轴传 `ByteResource.href`），它们相同是因为夹具让它们相同，不是类型保证的。
 
 **三处与草案的冲突已定**（见对话记录与计划 §三）：① 两个名字都留（阶段一实测证明 `recomputed` 与 `semantic` 必须分开）；② `requiresValidator` 的零覆盖要正面处理；③ reducer 用**类型**收不到数值，而不是靠规则禁止。
 
