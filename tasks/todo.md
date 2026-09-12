@@ -19,6 +19,32 @@
 
 ## Review
 
+### Gate 1 —— 第一次真实编译（2026-09-12）
+
+仓库 `54zhien/nagi-engine`（private）已建，`main` 已推，CI 已跑。
+
+**第一次：Build 红，一个错误。**
+
+```
+Sources/SpikeKit/Probes.swift:291:33: error: 'try' cannot appear to the
+right of a non-assignment operator
+291 |   frame: rubyFrame ?? try requireFrame(rubyInput),
+```
+
+按用户定的三类分流，这属于**实现错误**（我的 Swift 写错），不是测试期望错、不是实验装置问题。已改成 `if let` / `else` 语句（`ca8ca06`）并重推。
+
+**这次运行的价值（比错误本身更重要）：**
+
+| 事实 | 含义 |
+|---|---|
+| workflow 本身跑通（checkout ✓ / toolchain ✓ / job 结构 ✓） | 唯一未经校验的 YAML 也没问题 |
+| `Fixture.swift`、`FontTables.swift` 编译通过 | **`ByteSlice` 的 owning-table 边界类型检查通过** |
+| `Report.swift` 已开始编译 | throwing 契约在 `Quantize` / `LineRecord` / `ProbeOutcome` / `LayoutReport` / `SpikeReport` 上的传导类型检查通过 |
+| `Typography.swift`、`main.swift` 尚未被编译 | 仍完全未验证 —— 含两处 CoreText 硬修复（`kCTFontAttributeName`、`RubyAnnotation` 5 参） |
+| Gate 2 | 被 Gate 1 依赖挡住，从未运行 |
+
+**仍未验证的**：66 个测试从未执行过；`swift test` 一次都没跑。
+
 ### 做了什么
 
 五项语义 + 两项连带项 + 用户复核后的三点，全部收掉。测试 **49 → 66 个**。

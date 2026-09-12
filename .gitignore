@@ -2,5 +2,6 @@
 .swiftpm/
 Package.resolved
 .artifacts/
+spike-artifacts/
 *.xcresult
 .DS_Store

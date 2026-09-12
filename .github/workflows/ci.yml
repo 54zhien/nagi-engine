@@ -47,27 +47,37 @@ jobs:
     name: Gate 2 — spike run and cross-process determinism
     runs-on: macos-15
     needs: gate-1
+    env:
+      # Deliberately not the tool's own default (`./.artifacts`, which is
+      # gitignored and right for local runs). `actions/upload-artifact` skips
+      # hidden files, so uploading from a dot-directory silently produces
+      # nothing — which is exactly what the first run of this workflow did,
+      # while reporting the step as a success.
+      OUT: spike-artifacts
     steps:
       - uses: actions/checkout@v4
 
       - name: Baseline run
-        run: swift run spike-b --out .artifacts/run1
+        run: swift run spike-b --out "$OUT/run1"
 
       - name: Second process, compared against the baseline
-        run: swift run spike-b --out .artifacts/run2 --expect .artifacts/run1/spike-b.fingerprint
+        run: swift run spike-b --out "$OUT/run2" --expect "$OUT/run1/spike-b.fingerprint"
 
       - name: Third process, compared against the baseline
-        run: swift run spike-b --out .artifacts/run3 --expect .artifacts/run1/spike-b.fingerprint
+        run: swift run spike-b --out "$OUT/run3" --expect "$OUT/run1/spike-b.fingerprint"
 
       - name: Compare canonical fingerprints
         run: |
-          cmp .artifacts/run1/spike-b.fingerprint .artifacts/run2/spike-b.fingerprint
-          cmp .artifacts/run1/spike-b.fingerprint .artifacts/run3/spike-b.fingerprint
+          cmp "$OUT/run1/spike-b.fingerprint" "$OUT/run2/spike-b.fingerprint"
+          cmp "$OUT/run1/spike-b.fingerprint" "$OUT/run3/spike-b.fingerprint"
 
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: spike-b-artifacts
-          path: .artifacts/
-          if-no-files-found: warn
+          path: ${{ env.OUT }}/
+          # `error`, not `warn`: an upload that quietly finds nothing is the
+          # same failure as a review image that quietly was not written, and
+          # both are indistinguishable from success in the log.
+          if-no-files-found: error
