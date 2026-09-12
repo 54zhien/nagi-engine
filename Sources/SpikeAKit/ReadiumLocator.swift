@@ -167,7 +167,11 @@ public struct ReadiumLocator: Codable, Sendable, Hashable {
                 fragments: fragments,
                 progression: try? container.decode(Double.self, forKey: JSONValue.AnyKey("progression")),
                 totalProgression: try? container.decode(Double.self, forKey: JSONValue.AnyKey("totalProgression")),
-                position: (try? container.decode(Double.self, forKey: JSONValue.AnyKey("position")))?.nonNegativeInt,
+                // Decoded as a JSONValue rather than a Double, because
+                // `nonNegativeInt` is a property of the JSON value — which is
+                // also how Readium does it: pop the value, then `.nonNegative()`
+                // — `Locator.swift:174`.
+                position: (try? container.decode(JSONValue.self, forKey: JSONValue.AnyKey("position")))?.nonNegativeInt,
                 otherLocations: other
             )
         }
