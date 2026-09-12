@@ -217,8 +217,10 @@ public enum SpikeB {
             ]
         ))
         probes.append(try ProbeOutcome(
-            name: "ruby-fallback-diagnostic",
-            question: "Does a character the bundled font lacks pull a substituted face into the ruby measurement?",
+            // Named for the phenomenon, not the outcome: it must read naturally
+            // whichever way it comes back.
+            name: "ruby-base-font-fallback",
+            question: "Does the base text pull a substituted face into the ruby measurement?",
             execution: .measured,
             finding: diagnostic.baseUsesRequestedFont ? .no : .yes,
             detail: diagnostic.baseUsesRequestedFont

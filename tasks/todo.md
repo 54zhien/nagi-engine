@@ -78,6 +78,31 @@
 
 **仍在等用户决定**：ruby 的 ADR-0005 冲突未解 —— 要解必须先让语料的 ruby base 被字体完全覆盖。**这是改语料，属于有意识的动作，我不擅自做。** 另外 kinsoku 现在诚实地说「无法结论」，但真正有用的问法是「CoreText 是否遵守禁则」（答案是个干净的 yes：0 违规 / 2152 行末 / 464 硬断行）—— 是否重述这个问题，同样是用户的决定。
 
+#### 拆分与换 fixture 后的结果（run 34673678342，全绿，74 测试）
+
+```
+font-feature-census           measured   no    缺 halt/palt/vrt2 等 10 项
+glyph-coverage                measured   no    2/276（U+30FC, U+6771）
+kinsoku-baseline-behavior     measured   yes   默认断行未产生所测禁则违规
+kinsoku-language-tag-effect   measured   no    两臂均 0，未观察到可测差异
+ruby-line-height              measured   yes   delta = 11.200pt（base/annotation 均用请求字体）
+ruby-fallback-diagnostic      measured   yes   CoreText 为 東京 替换了字体
+vertical-column-flow          measured   yes   407 单元 / 26 列
+```
+
+**最重要的发现：被污染的测量不只是「不可归因」，它是错的。**
+
+| fixture | plainLineHeight | rubyLineHeight | delta |
+|---|---|---|---|
+| 正式 `京都`/`きょうと`（全覆盖） | 22.400 | **33.600** | **11.200** |
+| 诊断 `東京`/`とうきょう`（缺 `東`） | 22.400 | **30.400** | **8.000** |
+
+plain 高度完全相同，差值全部落在 ruby 上。**8.000 vs 11.200 —— 差 3.2pt（40%）。** 若当初接受那个 `yes`/8.000，ADR-0005 会建立在一个**字体替换的产物**上。
+
+干净值的机制可解释：`11.200 = 8 × 1.4`，其中 8 = `16 × 0.5`（annotation 字号），1.4 = `22.400 / 16`（本字体的行高比）。即 **CoreText 把 annotation 自身的完整行框加到了 base 行框上**。
+
+跨进程：run2 `measured / yes`；三进程 PNG 与 fingerprint **逐字节相同**；完整 JSON 因 `expectedFingerprint` 而不同（设计如此）。
+
 #### 已独立复核为正确的
 
 - `glyph-coverage` 报缺 `U+6771 東`、`U+30FC ー` —— 我用直接 cmap 解析复核，二者确实 glyph 0，探针无误。

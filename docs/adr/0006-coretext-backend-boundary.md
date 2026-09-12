@@ -32,4 +32,27 @@ CoreText 可以回答          Nagi 决定
 
 - **竖排需要独立验证**：`CTFramesetterSuggestFrameSizeWithConstraints` 的 `fitRange` 假设水平填充模型，在 `CTFrameProgression.rightToLeft` 下不可信；`CTFrameProgression` 需传**数字 rawValue**，传 Swift enum 会静默失败。竖排度量来自字体的 `vmtx`/`vhea` 表 —— Hiragino / PingFang / Songti 有，SF Pro 没有。
 - 选择 UI（手柄 / 放大镜 / 菜单 / 复制）、VoiceOver、词典 Look Up、文本缩放**全部自研**。这些目前由 Readium 提供。
-- Pending Spike B：验证 Nagi 能在自己控制 fragmentation 的前提下，把 CoreText 驯成可控 backend。
+- Spike B 已回报（2026-09-12）：CoreText 可用作**候选**断行 backend，最终 policy 仍归 Nagi —— 见下节。
+
+**Spike B 结论：候选断行（2026-09-12）**
+
+在固定字体、固定 runtime 与当前 kinsoku corpus 下（29 个宽度 × tagged / untagged 两臂，合计 **2152** 个有效行末、**464** 个 mandatory breaks）：
+
+- CoreText 的**默认候选断行**未产生被检测到的行首 / 行末禁则违规。
+- 对同一 corpus 添加 `kCTLanguageAttributeName` 后，未观察到相对于无标签 control 的可测差异。
+
+因此 Nagi v1 **可以使用 CoreText / `CTTypesetter` 作为候选断行 backend**，以降低第一阶段自行实现完整 Unicode / CJK line breaker 的范围；但**最终 line-break policy、禁则校验与候选断点修正权仍属于 Nagi Layout Engine**：
+
+```
+CTTypesetterSuggestLineBreak
+        ↓
+candidate break
+        ↓
+Nagi LineBreakPolicy
+        ↓
+accept / adjust
+```
+
+此结果仅说明**当前 corpus 中未发现违规**，不构成 CoreText 对完整 UAX #14、日本語組版规则或所有 CJK 内容的兼容性保证。后续 corpus 扩张发现反例时，由 Nagi `LineBreakPolicy` 层补充规则，而**不改变 backend 边界**。
+
+（测量自身的有效性由 probe 自证：行末检查是否真的执行过、布局是否顶到测量画布。任一条不满足即 `inconclusive`，不产出 yes/no。同一条原则也适用于 ruby 侧 —— 被污染的一次 ruby 测量给出 8.000pt 而干净测量给出 11.200pt，两者在报告里长得一模一样。）
