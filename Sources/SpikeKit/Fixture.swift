@@ -45,10 +45,24 @@ public enum Fixture {
         "（", "「", "『", "【", "〔", "《", "〈", "“", "‘"
     ]
 
-    /// Base and annotation for the ruby probe. Written as a bare pair so the
-    /// probe does not depend on any HTML parsing.
-    public static let rubyBase = "東京"
-    public static let rubyAnnotation = "とうきょう"
+    /// The ruby probe's formal pair, chosen from the glyph census rather than
+    /// from what reads nicely: both strings are fully covered by the bundled
+    /// face, so nothing in the measurement can have come from a substitute.
+    ///
+    /// Written as a bare pair so the probe depends on no HTML parsing.
+    public static let rubyBase = "京都"
+    public static let rubyAnnotation = "きょうと"
+
+    /// The pair that motivated the census check. `東` is not in the bundled face,
+    /// so CoreText substitutes another font and the ruby metrics stop being
+    /// attributable to the font under test.
+    ///
+    /// Kept on purpose: the contamination it demonstrates is itself a result —
+    /// it is why `ruby-line-height` refuses to conclude on text the font cannot
+    /// draw, and why a fixture is not allowed to be quietly "fixed" into looking
+    /// clean.
+    public static let rubyFallbackDiagnosticBase = "東京"
+    public static let rubyFallbackDiagnosticAnnotation = "とうきょう"
 
     /// A line for the ruby probe: surrounding text plus an annotated span, so
     /// the measurement can tell whether ruby adds height or overlaps neighbours.
@@ -59,7 +73,13 @@ public enum Fixture {
     public static var coverageSample: [Character] {
         var seen = Set<Character>()
         var ordered: [Character] = []
-        for ch in body + rubyBase + rubyAnnotation + rubyContextPrefix + rubyContextSuffix {
+        // The diagnostic pair is part of what we test, so its missing glyph is
+        // expected to appear in this census — that entry is what connects the
+        // coverage report to the ruby probe's refusal to conclude.
+        let rubyMaterial = rubyBase + rubyAnnotation
+            + rubyFallbackDiagnosticBase + rubyFallbackDiagnosticAnnotation
+            + rubyContextPrefix + rubyContextSuffix
+        for ch in body + rubyMaterial {
             if ch == "\n" { continue }
             if seen.insert(ch).inserted { ordered.append(ch) }
         }

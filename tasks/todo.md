@@ -61,6 +61,23 @@
 
 新增 7 个测试（其中 `testCleanControlMeansNothingWasMeasured` 就是 P1 那个缺陷的回归），删除 1 个已失效的 canvas 测试，共 **72 个**。
 
+#### 修复后的验证（run 34672896195）
+
+两个 gate 全绿，**72 个测试通过**。四条预判全部命中：
+
+| probe | 修复前 | 修复后 |
+|---|---|---|
+| `kinsoku-language-tag` | `yes` | **`inconclusive`** — "both the tagged run and its untagged control were clean (2152 line ends inspected) — the tag made no measurable difference" |
+| `ruby-line-height` | `yes` | **`inconclusive`** — "the ruby base 東京 contains 1 character(s) the bundled font does not cover (U+6771) — with font fallback the line metrics may come from a substituted face"。`delta=8` **仍留在 numbers 里**（证据保留，结论撤回） |
+| `vertical-column-flow` | `columns=2`（其实是页数） | **`columns=26`** — 真·单列，407 单元全部消耗，无卡死 |
+| `ruby.png` | 1244 字节（空白） | **5080 字节**，目视确认渲染出 `彼は東京へ行った。` 与上方 `とうきょう` |
+
+**目视确认加强了 P3 的诊断**：`東` 在图里**是被渲染出来的**（不是空框），说明 CoreText 做了字体替换 —— 所以准确说法是「度量可能来自替代字体」，而非「测在 .notdef 上」。detail 的措辞正好对应这个机制。
+
+旁证：`vertical-column-0.png` 与上一轮**逐字节相同**（82696）—— 我没有改那条渲染路径，渲染又是确定性的，字节一致符合预期。新指纹 `35fdf28c…`（因上报值变化而改变，属正确行为）。
+
+**仍在等用户决定**：ruby 的 ADR-0005 冲突未解 —— 要解必须先让语料的 ruby base 被字体完全覆盖。**这是改语料，属于有意识的动作，我不擅自做。** 另外 kinsoku 现在诚实地说「无法结论」，但真正有用的问法是「CoreText 是否遵守禁则」（答案是个干净的 yes：0 违规 / 2152 行末 / 464 硬断行）—— 是否重述这个问题，同样是用户的决定。
+
 #### 已独立复核为正确的
 
 - `glyph-coverage` 报缺 `U+6771 東`、`U+30FC ー` —— 我用直接 cmap 解析复核，二者确实 glyph 0，探针无误。

@@ -323,6 +323,34 @@ public enum TextLayout {
         )
     }
 
+    /// The PostScript name behind a font, going through the descriptor because
+    /// that is the accessor this target already relies on.
+    static func postScriptName(of font: CTFont) -> String? {
+        CTFontDescriptorCopyAttribute(
+            CTFontCopyFontDescriptor(font),
+            kCTFontNameAttribute
+        ) as? String
+    }
+
+    /// Whether CoreText would draw `text` entirely with the requested face.
+    ///
+    /// A coverage table says what a font *has*; this asks the text stack what it
+    /// would *use*. The difference is the point — an uncovered character silently
+    /// pulls in a substitute, and from then on the line metrics belong to a font
+    /// nobody asked about.
+    public static func usesOnlyTheRequestedFont(_ text: String, font: CTFont) -> Bool {
+        let substituted: CTFont? = CTFontCreateForString(
+            font,
+            text as CFString,
+            CFRange(location: 0, length: text.utf16.count)
+        )
+        guard let substituted,
+              let requested = postScriptName(of: font),
+              let resolved = postScriptName(of: substituted)
+        else { return false }
+        return requested == resolved
+    }
+
     /// The vertical space one line wants. Used to make a frame exactly one
     /// column wide; measured off a single ideograph so the pitch does not depend
     /// on the corpus.
@@ -552,75 +580,106 @@ public enum Kinsoku {
         )
     }
 
-    /// The probe's decision.
-    public struct Decision: Sendable {
+    /// One probe's verdict.
+    public struct Outcome: Sendable {
         public var execution: ProbeOutcome.Execution
         public var finding: ProbeOutcome.Finding?
         public var detail: String
     }
 
-    /// Decides what the kinsoku probe may conclude.
+    /// What the sweep may conclude — two questions, two verdicts.
     ///
-    /// Kept pure and separate from the probe because this rule was wrong once,
-    /// and being wrong here is invisible: the first real run looked only at the
-    /// tagged arm and reported "yes" for a sweep in which the untagged control
-    /// had also seen zero violations — a measurement with nothing to measure.
-    ///
-    /// Experiment validity comes first, because neither of those failures says
-    /// anything about the language tag.
-    public static func decide(
+    /// One probe answering both has to pick a single verdict, and here the two
+    /// answers genuinely differ: the default behaviour is a clean yes while the
+    /// tag has no observable effect. Collapsing them is what produced a probe
+    /// reporting `yes` while its own control was equally clean — and then, once
+    /// the control was wired in, `inconclusive` for an experiment that had in
+    /// fact run perfectly well.
+    public struct Assessment: Sendable {
+        /// Does CoreText's default line breaking avoid the tested violations?
+        public var baseline: Outcome
+        /// Does adding the language tag change the observed behaviour?
+        public var tagEffect: Outcome
+    }
+
+    /// Kept pure and separate from the probe because the rule is the part that
+    /// was wrong, and a rule living inside a font-dependent probe cannot be
+    /// tested.
+    public static func assess(
         tagged: Violations,
         untagged: Violations,
         contentHeight: Double,
         canvasHeight: Double
-    ) -> Decision {
+    ) -> Assessment {
         let hardBreakLines = tagged.hardBreakLines + untagged.hardBreakLines
         let inspectedLineEnds = tagged.inspectedLineEnds + untagged.inspectedLineEnds
 
+        // Measurement validity first. Neither failure below says anything about
+        // the language tag OR about CoreText, so both questions are unanswerable.
         if hardBreakLines > 0 && inspectedLineEnds == 0 {
-            return Decision(
-                execution: .inconclusive,
-                finding: nil,
-                detail: "\(hardBreakLines) hard-broken lines but no line end was inspected — "
-                    + "the line-end check was bypassed, so this probe cannot conclude"
+            return invalid(
+                "\(hardBreakLines) hard-broken lines but no line end was inspected — "
+                    + "the line-end check was bypassed"
             )
         }
         if contentHeight >= canvasHeight * canvasHeadroom {
-            return Decision(
-                execution: .inconclusive,
-                finding: nil,
-                detail: "content height \(String(format: "%.1f", contentHeight))pt reached "
+            return invalid(
+                "content height \(String(format: "%.1f", contentHeight))pt reached "
                     + "\(Int(canvasHeadroom * 100))% of the \(Int(canvasHeight))pt canvas — "
-                    + "the layout may have been clamped, so this probe cannot conclude"
+                    + "the layout may have been clamped"
             )
         }
 
-        // The untagged arm is a control, not decoration: the question is whether
-        // the tag BUYS 禁則処理, and a control that is equally clean means there
-        // was nothing for it to buy.
-        if tagged.total == 0 && untagged.total == 0 {
-            return Decision(
-                execution: .inconclusive,
-                finding: nil,
-                detail: "both the tagged run and its untagged control were clean across the sweep "
-                    + "(\(inspectedLineEnds) line ends inspected) — the tag made no measurable "
-                    + "difference, so this probe cannot conclude"
-            )
-        }
-        if tagged.total == 0 {
-            return Decision(
+        let baseline: Outcome
+        if untagged.total == 0 {
+            baseline = Outcome(
                 execution: .measured,
                 finding: .yes,
-                detail: "the tagged run had no violations while the untagged control produced "
-                    + "\(untagged.total) — the tag removed violations the control showed"
+                detail: "CoreText's default line breaking produced none of the tested 禁則 violations "
+                    + "(\(untagged.hardBreakLines) hard-broken lines, "
+                    + "\(untagged.inspectedLineEnds) line ends inspected) — scoped to this corpus, "
+                    + "font and runtime, not a claim about UAX #14 in general"
+            )
+        } else {
+            baseline = Outcome(
+                execution: .measured,
+                finding: .no,
+                detail: "CoreText's default line breaking produced \(untagged.total) tested 禁則 "
+                    + "violation(s) (\(untagged.lineStartsWithProhibited) line-start, "
+                    + "\(untagged.lineEndsWithProhibited) line-end)"
             )
         }
-        return Decision(
-            execution: .measured,
-            finding: .no,
-            detail: "\(tagged.total) violations remain with the run tagged \"ja\" "
-                + "(untagged produced \(untagged.total))"
+
+        // The literal question is whether a difference was OBSERVED, so an
+        // equally clean control answers it: no. What that does not establish is
+        // that the tag never matters — the detail must not overreach.
+        let tagEffect: Outcome
+        if tagged.total == untagged.total {
+            tagEffect = Outcome(
+                execution: .measured,
+                finding: .no,
+                detail: "no measurable difference was observed between the tagged run and its "
+                    + "untagged control for this fixture corpus: both produced "
+                    + "\(tagged.total) tested 禁則 violation(s)"
+            )
+        } else {
+            tagEffect = Outcome(
+                execution: .measured,
+                finding: .yes,
+                detail: "the tagged run produced \(tagged.total) violation(s) against the untagged "
+                    + "control's \(untagged.total) — the tag changed the observed behaviour"
+            )
+        }
+        return Assessment(baseline: baseline, tagEffect: tagEffect)
+    }
+
+    private static func invalid(_ reason: String) -> Assessment {
+        let outcome = Outcome(
+            execution: .inconclusive,
+            finding: nil,
+            detail: reason + ", so neither probe can conclude"
         )
+        return Assessment(baseline: outcome, tagEffect: outcome)
     }
 
     private static func character(in units: [UInt16], at index: Int) -> Character? {

@@ -29,7 +29,7 @@ public enum SpikeB {
     ///
     /// But a canvas that is merely very large is not the same as one that cannot
     /// constrain the layout, and confusing the two would mean reading "the text
-    /// ran out of room" as "CoreText broke the line here". `Kinsoku.decide`
+    /// ran out of room" as "CoreText broke the line here". `Kinsoku.assess`
     /// applies that headroom rule.
     public static let measurementCanvasHeight: CGFloat = 1_000_000
 
@@ -99,7 +99,7 @@ public enum SpikeB {
         // ---- Kinsoku: tagged vs untagged ---------------------------------
         // The untagged arm is a control, not decoration, so the two arms are
         // accumulated separately. The rule that reads them lives in
-        // `Kinsoku.decide`, where it can be tested without a font.
+        // `Kinsoku.assess`, where it can be tested without a font.
         var tagged = Kinsoku.Violations(
             lineStartsWithProhibited: 0, lineEndsWithProhibited: 0,
             hardBreakLines: 0, inspectedLineEnds: 0
@@ -130,102 +130,113 @@ public enum SpikeB {
             }
         }
 
-        let kinsokuDecision = Kinsoku.decide(
+        let kinsoku = Kinsoku.assess(
             tagged: tagged,
             untagged: untagged,
             contentHeight: contentHeight,
             canvasHeight: Double(measurementCanvasHeight)
         )
+
+        // Two questions, two probes. A single probe answering both would have to
+        // pick one verdict, and these two answers genuinely differ: the default
+        // behaviour is a clean yes while the tag has no observable effect.
         probes.append(try ProbeOutcome(
-            name: "kinsoku-language-tag",
-            question: "Does kCTLanguageAttributeName actually buy 禁則処理?",
-            execution: kinsokuDecision.execution,
-            finding: kinsokuDecision.finding,
-            detail: kinsokuDecision.detail,
+            name: "kinsoku-baseline-behavior",
+            question: "Does CoreText's default line breaking avoid the tested 禁則 violations?",
+            execution: kinsoku.baseline.execution,
+            finding: kinsoku.baseline.finding,
+            detail: kinsoku.baseline.detail,
             numbers: [
-                "taggedViolations": Double(tagged.total),
-                "taggedLineStart": Double(tagged.lineStartsWithProhibited),
-                "taggedLineEnd": Double(tagged.lineEndsWithProhibited),
                 "untaggedViolations": Double(untagged.total),
                 "untaggedLineStart": Double(untagged.lineStartsWithProhibited),
                 "untaggedLineEnd": Double(untagged.lineEndsWithProhibited),
                 "sweptWidths": Double(sweepWidths.count),
-                "hardBreakLines": Double(tagged.hardBreakLines + untagged.hardBreakLines),
-                "inspectedLineEnds": Double(tagged.inspectedLineEnds + untagged.inspectedLineEnds),
+                "hardBreakLines": Double(untagged.hardBreakLines),
+                "inspectedLineEnds": Double(untagged.inspectedLineEnds),
                 "contentHeight": contentHeight,
                 "canvasHeight": Double(measurementCanvasHeight)
             ]
         ))
+        probes.append(try ProbeOutcome(
+            name: "kinsoku-language-tag-effect",
+            question: "Does kCTLanguageAttributeName change the observed line breaking?",
+            execution: kinsoku.tagEffect.execution,
+            finding: kinsoku.tagEffect.finding,
+            detail: kinsoku.tagEffect.detail,
+            numbers: [
+                "taggedViolations": Double(tagged.total),
+                "untaggedViolations": Double(untagged.total),
+                "violationDelta": Double(tagged.total - untagged.total),
+                "sweptWidths": Double(sweepWidths.count),
+                "hardBreakLines": Double(tagged.hardBreakLines + untagged.hardBreakLines),
+                "inspectedLineEnds": Double(tagged.inspectedLineEnds + untagged.inspectedLineEnds)
+            ]
+        ))
 
         // ---- Ruby: does it contribute to line height? --------------------
-        let rubyBaseText = Fixture.rubyContextPrefix + Fixture.rubyBase + Fixture.rubyContextSuffix
-        let rubyRange = NSRange(
-            location: Fixture.rubyContextPrefix.utf16.count,
-            length: Fixture.rubyBase.utf16.count
+        //
+        // Two fixture pairs, and the distance between them is the point. The
+        // formal pair is fully covered by the bundled face, so nothing in its
+        // measurement can come from a substitute. The diagnostic pair is the one
+        // that taught us that a missing glyph does exactly that.
+        let formal = try measureRuby(
+            base: Fixture.rubyBase,
+            annotation: Fixture.rubyAnnotation,
+            labelPrefix: "ruby",
+            font: font
         )
-        let plainInput = LayoutInput(
-            text: rubyBaseText, font: font, fontSize: fontSize,
-            measureWidth: 10_000, pageHeight: 10_000, lineSpacing: 0,
-            label: "ruby-off"
+        let diagnostic = try measureRuby(
+            base: Fixture.rubyFallbackDiagnosticBase,
+            annotation: Fixture.rubyFallbackDiagnosticAnnotation,
+            labelPrefix: "ruby-fallback",
+            font: font
         )
-        let rubyInput = LayoutInput(
-            text: rubyBaseText, font: font, fontSize: fontSize,
-            measureWidth: 10_000, pageHeight: 10_000, lineSpacing: 0,
-            label: "ruby-on",
-            ruby: (annotation: Fixture.rubyAnnotation, range: rubyRange),
-            rubySizeFactor: rubySizeFactor
-        )
-        let (plainReport, _) = try TextLayout.layout(plainInput)
-        let (rubyReport, _) = try TextLayout.layout(rubyInput)
-
-        let plainHeight = (plainReport.lines.first.map { $0.ascent + $0.descent + $0.leading }) ?? 0
-        let rubyHeight = (rubyReport.lines.first.map { $0.ascent + $0.descent + $0.leading }) ?? 0
-        let heightDelta = rubyHeight - plainHeight
-
-        // This probe measures a line box, so it only means anything if each run
-        // produced exactly one line. A wrapped run would be measuring where the
-        // line broke, not how tall it is.
-        let singleLine = plainReport.lineCount == 1 && rubyReport.lineCount == 1
-
-        // And it only means anything if the base text is renderable in the font
-        // under test. `東京` contains 東, which this face has no glyph for, so the
-        // metrics may come from a fallback face and cannot be attributed to the
-        // bundled font. Checking it here rather than correcting the fixture keeps
-        // the corpus change a deliberate act.
-        let rubyBaseCoverage = FontCoverage.measure(
-            font: font,
-            characters: Array(Fixture.rubyBase)
-        )
-        let baseIsRenderable = rubyBaseCoverage.missingCharacters == 0
-        let measurable = singleLine && baseIsRenderable
 
         probes.append(try ProbeOutcome(
             name: "ruby-line-height",
             question: "Does CoreText reserve line height for ruby, or must Nagi do it?",
-            execution: measurable ? .measured : .inconclusive,
-            finding: measurable ? (heightDelta > 0.5 ? .yes : .no) : nil,
-            detail: !measurable
-                ? (baseIsRenderable
-                    ? "the measurement wrapped (\(plainReport.lineCount) plain / \(rubyReport.lineCount) ruby lines) — line breaking is not the variable under test, so this probe cannot conclude"
-                    : "the ruby base \(Fixture.rubyBase) contains \(rubyBaseCoverage.missingCharacters) character(s) the bundled font does not cover (\(rubyBaseCoverage.missingScalars.joined(separator: " "))) — with font fallback the line metrics may come from a substituted face, so this probe cannot conclude")
-                : (heightDelta > 0.5
-                    ? "ruby at size factor \(rubySizeFactor) raised the line box by \(String(format: "%.3f", heightDelta))pt — CoreText accounts for it"
-                    : "ruby at size factor \(rubySizeFactor) changed the line box by \(String(format: "%.3f", heightDelta))pt — CoreText does NOT reserve space; Nagi must compute annotationBeforeExtent itself (ADR-0005)"),
+            execution: formal.soundnessFailure == nil ? .measured : .inconclusive,
+            finding: formal.soundnessFailure == nil
+                ? (formal.heightDelta > 0.5 ? .yes : .no)
+                : nil,
+            detail: formal.soundnessFailure
+                ?? (formal.heightDelta > 0.5
+                    ? "ruby at size factor \(rubySizeFactor) raised the line box by \(String(format: "%.3f", formal.heightDelta))pt — CoreText accounts for it"
+                    : "ruby at size factor \(rubySizeFactor) changed the line box by \(String(format: "%.3f", formal.heightDelta))pt — CoreText does NOT reserve space; Nagi must compute annotationBeforeExtent itself (ADR-0005)"),
             numbers: [
-                "plainLineHeight": plainHeight,
-                "rubyLineHeight": rubyHeight,
-                "delta": heightDelta,
-                "plainLineCount": Double(plainReport.lineCount),
-                "rubyLineCount": Double(rubyReport.lineCount),
-                "rubyBaseMissingGlyphs": Double(rubyBaseCoverage.missingCharacters),
+                "plainLineHeight": formal.plainHeight,
+                "rubyLineHeight": formal.rubyHeight,
+                "delta": formal.heightDelta,
+                "plainLineCount": Double(formal.plainReport.lineCount),
+                "rubyLineCount": Double(formal.rubyReport.lineCount),
+                "baseUsesRequestedFont": formal.baseUsesRequestedFont ? 1 : 0,
+                "annotationUsesRequestedFont": formal.annotationUsesRequestedFont ? 1 : 0,
                 // Reported so a future API misuse shows up here rather than
                 // leaving every assertion green while the experiment changed.
                 "requestedRubySizeFactor": Double(rubySizeFactor)
             ]
         ))
+        probes.append(try ProbeOutcome(
+            name: "ruby-fallback-diagnostic",
+            question: "Does a character the bundled font lacks pull a substituted face into the ruby measurement?",
+            execution: .measured,
+            finding: diagnostic.baseUsesRequestedFont ? .no : .yes,
+            detail: diagnostic.baseUsesRequestedFont
+                ? "CoreText resolves \(diagnostic.base) to the bundled face — nothing to report"
+                : "CoreText substitutes another face for \(diagnostic.base), and the line box still moved by \(String(format: "%.3f", diagnostic.heightDelta))pt — a metric measured this way belongs to a font nobody asked about. This is why the formal fixture is chosen from the glyph census rather than for how it reads.",
+            numbers: [
+                "plainLineHeight": diagnostic.plainHeight,
+                "rubyLineHeight": diagnostic.rubyHeight,
+                "delta": diagnostic.heightDelta,
+                "baseUsesRequestedFont": diagnostic.baseUsesRequestedFont ? 1 : 0,
+                "annotationUsesRequestedFont": diagnostic.annotationUsesRequestedFont ? 1 : 0
+            ]
+        ))
 
-        layouts.append(plainReport)
-        layouts.append(rubyReport)
+        // Only the formal pair feeds the layouts: the diagnostic's value is its
+        // verdict and its numbers, not another two rows in the golden.
+        layouts.append(formal.plainReport)
+        layouts.append(formal.rubyReport)
 
         // ---- Vertical column flow ----------------------------------------
         let verticalInput = LayoutInput(
@@ -293,10 +304,10 @@ public enum SpikeB {
         // image. The review image gets a frame whose box IS the canvas.
         let rubyCanvas = CGSize(width: 400, height: 120)
         let rubyRenderInput = LayoutInput(
-            text: rubyBaseText, font: font, fontSize: fontSize,
+            text: rubyText(Fixture.rubyBase), font: font, fontSize: fontSize,
             measureWidth: rubyCanvas.width, pageHeight: rubyCanvas.height,
             lineSpacing: 0, label: "ruby-render",
-            ruby: (annotation: Fixture.rubyAnnotation, range: rubyRange),
+            ruby: (annotation: Fixture.rubyAnnotation, range: rubyRange(Fixture.rubyBase)),
             rubySizeFactor: rubySizeFactor
         )
         let rubyArtifact = ArtifactRecord(byteCount: try Renderer.writePNG(
@@ -363,6 +374,100 @@ public enum SpikeB {
             detail: detail
         )
         return report
+    }
+
+    /// The ruby MEASUREMENT box is deliberately huge so that nothing wraps — a
+    /// wrapped line measures where the line broke, not how tall it is. Rendering
+    /// uses its own, much smaller box.
+    static let rubyMeasurementExtent: CGFloat = 10_000
+
+    static func rubyText(_ base: String) -> String {
+        Fixture.rubyContextPrefix + base + Fixture.rubyContextSuffix
+    }
+
+    static func rubyRange(_ base: String) -> NSRange {
+        NSRange(
+            location: Fixture.rubyContextPrefix.utf16.count,
+            length: base.utf16.count
+        )
+    }
+
+    /// One ruby fixture pair, measured twice — once plain, once annotated.
+    struct RubyMeasurement {
+        var base: String
+        var annotation: String
+        var plainReport: LayoutReport
+        var rubyReport: LayoutReport
+        var plainHeight: Double
+        var rubyHeight: Double
+        var baseUsesRequestedFont: Bool
+        var annotationUsesRequestedFont: Bool
+
+        var heightDelta: Double { rubyHeight - plainHeight }
+
+        /// Why this measurement may not be believed, or nil when it may. Every
+        /// condition here is one that would let the numbers belong to something
+        /// other than the fixture, the font and the line box under test.
+        var soundnessFailure: String? {
+            if plainReport.lineCount != 1 || rubyReport.lineCount != 1 {
+                return "the measurement wrapped (\(plainReport.lineCount) plain / "
+                    + "\(rubyReport.lineCount) ruby lines) — line breaking is not the "
+                    + "variable under test"
+            }
+            if !baseUsesRequestedFont {
+                return "CoreText substitutes another face for the base \(base) — the line "
+                    + "metrics would not belong to the bundled font"
+            }
+            if !annotationUsesRequestedFont {
+                return "CoreText substitutes another face for the annotation \(annotation) — "
+                    + "same problem as the base"
+            }
+            return nil
+        }
+    }
+
+    static func measureRuby(
+        base: String,
+        annotation: String,
+        labelPrefix: String,
+        font: CTFont
+    ) throws -> RubyMeasurement {
+        let text = rubyText(base)
+        let range = rubyRange(base)
+
+        let plainInput = LayoutInput(
+            text: text, font: font, fontSize: fontSize,
+            measureWidth: rubyMeasurementExtent,
+            pageHeight: rubyMeasurementExtent,
+            lineSpacing: 0,
+            label: "\(labelPrefix)-off"
+        )
+        let rubyInput = LayoutInput(
+            text: text, font: font, fontSize: fontSize,
+            measureWidth: rubyMeasurementExtent,
+            pageHeight: rubyMeasurementExtent,
+            lineSpacing: 0,
+            label: "\(labelPrefix)-on",
+            ruby: (annotation: annotation, range: range),
+            rubySizeFactor: rubySizeFactor
+        )
+        let plainReport = try TextLayout.layout(plainInput).report
+        let rubyReport = try TextLayout.layout(rubyInput).report
+
+        return RubyMeasurement(
+            base: base,
+            annotation: annotation,
+            plainReport: plainReport,
+            rubyReport: rubyReport,
+            plainHeight: lineBoxHeight(of: plainReport),
+            rubyHeight: lineBoxHeight(of: rubyReport),
+            baseUsesRequestedFont: TextLayout.usesOnlyTheRequestedFont(base, font: font),
+            annotationUsesRequestedFont: TextLayout.usesOnlyTheRequestedFont(annotation, font: font)
+        )
+    }
+
+    static func lineBoxHeight(of report: LayoutReport) -> Double {
+        (report.lines.first.map { $0.ascent + $0.descent + $0.leading }) ?? 0
     }
 
     /// Frames are built by `TextLayout.makeFrame`, which returns nil only if

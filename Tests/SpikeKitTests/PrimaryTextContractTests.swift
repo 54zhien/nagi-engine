@@ -97,10 +97,22 @@ final class PrimaryTextContractTests: XCTestCase {
 
     /// Ruby is measured on its own line in the ruby probe. If the font cannot
     /// draw 東京 or とうきょう, that probe measures .notdef boxes.
+    /// The formal pair and the diagnostic pair are both part of what we test —
+    /// the diagnostic's missing glyph is expected to show up in this census, and
+    /// that entry is what connects the coverage report to the ruby probe.
     func testCoverageSampleIncludesRubyMaterial() {
         let sample = Set(Fixture.coverageSample)
         XCTAssertTrue(Fixture.rubyBase.allSatisfy { sample.contains($0) })
         XCTAssertTrue(Fixture.rubyAnnotation.allSatisfy { sample.contains($0) })
+        XCTAssertTrue(Fixture.rubyFallbackDiagnosticBase.allSatisfy { sample.contains($0) })
+        XCTAssertTrue(Fixture.rubyFallbackDiagnosticAnnotation.allSatisfy { sample.contains($0) })
+    }
+
+    /// The two ruby pairs must stay distinct, or the diagnostic silently becomes
+    /// the formal fixture and the probe goes back to measuring fallback metrics.
+    func testRubyFixturesAreDistinct() {
+        XCTAssertNotEqual(Fixture.rubyBase, Fixture.rubyFallbackDiagnosticBase)
+        XCTAssertNotEqual(Fixture.rubyAnnotation, Fixture.rubyFallbackDiagnosticAnnotation)
     }
 
     // MARK: - Consumed range vs content range
@@ -230,86 +242,103 @@ final class PrimaryTextContractTests: XCTestCase {
     }
 
     // MARK: - The kinsoku verdict rule
+    //
+    // Two questions, so two verdicts. A single rule answering both had to pick
+    // one, and it picked wrong: it read only the tagged arm and reported `yes`
+    // for a sweep whose control was equally clean.
 
-    /// The regression that matters most. A sweep in which BOTH arms are clean has
-    /// nothing to measure: the probe asks whether the language tag *buys* 禁則,
-    /// and a control that is equally clean means there was nothing to buy.
-    ///
-    /// The first real run reported `yes` here, because the rule looked only at
-    /// the tagged arm — this is the assertion that would have caught it.
-    func testCleanControlMeansNothingWasMeasured() {
-        let decision = Kinsoku.decide(
+    /// The default-behaviour question is answered by the untagged arm alone.
+    func testCleanBaselineIsAMeasuredYes() {
+        let assessment = Kinsoku.assess(
             tagged: violations(start: 0, end: 0, hardBreak: 30, inspected: 200),
             untagged: violations(start: 0, end: 0, hardBreak: 30, inspected: 200),
             contentHeight: 1_000,
             canvasHeight: 1_000_000
         )
-        XCTAssertEqual(decision.execution, .inconclusive)
-        XCTAssertNil(decision.finding, "an equally clean control leaves nothing for the tag to buy")
+        XCTAssertEqual(assessment.baseline.execution, .measured)
+        XCTAssertEqual(assessment.baseline.finding, .yes)
     }
 
-    func testTagThatRemovesControlViolationsIsAYes() {
-        let decision = Kinsoku.decide(
+    func testBaselineViolationsAreAMeasuredNo() {
+        let assessment = Kinsoku.assess(
+            tagged: violations(start: 2, end: 0, hardBreak: 30, inspected: 200),
+            untagged: violations(start: 2, end: 0, hardBreak: 30, inspected: 200),
+            contentHeight: 1_000,
+            canvasHeight: 1_000_000
+        )
+        XCTAssertEqual(assessment.baseline.execution, .measured)
+        XCTAssertEqual(assessment.baseline.finding, .no)
+    }
+
+    /// The tag question is literally "was a difference observed?", so an equally
+    /// clean control answers it: no. And the baseline question stays answerable,
+    /// which is the whole reason the two are separate.
+    func testNoObservedDifferenceIsAMeasuredNo() {
+        let assessment = Kinsoku.assess(
+            tagged: violations(start: 0, end: 0, hardBreak: 30, inspected: 200),
+            untagged: violations(start: 0, end: 0, hardBreak: 30, inspected: 200),
+            contentHeight: 1_000,
+            canvasHeight: 1_000_000
+        )
+        XCTAssertEqual(assessment.tagEffect.execution, .measured)
+        XCTAssertEqual(assessment.tagEffect.finding, .no)
+        XCTAssertEqual(assessment.baseline.finding, .yes)
+    }
+
+    func testObservedDifferenceIsAMeasuredYes() {
+        let assessment = Kinsoku.assess(
             tagged: violations(start: 0, end: 0, hardBreak: 30, inspected: 200),
             untagged: violations(start: 4, end: 0, hardBreak: 30, inspected: 200),
             contentHeight: 1_000,
             canvasHeight: 1_000_000
         )
-        XCTAssertEqual(decision.execution, .measured)
-        XCTAssertEqual(decision.finding, .yes)
+        XCTAssertEqual(assessment.tagEffect.execution, .measured)
+        XCTAssertEqual(assessment.tagEffect.finding, .yes)
+        XCTAssertEqual(assessment.baseline.finding, .no)
     }
 
-    func testTagThatLeavesViolationsIsANo() {
-        let decision = Kinsoku.decide(
-            tagged: violations(start: 3, end: 0, hardBreak: 30, inspected: 200),
-            untagged: violations(start: 0, end: 0, hardBreak: 30, inspected: 200),
-            contentHeight: 1_000,
-            canvasHeight: 1_000_000
-        )
-        XCTAssertEqual(decision.execution, .measured)
-        XCTAssertEqual(decision.finding, .no)
-    }
-
-    /// Experiment validity outranks the comparison: a bypassed line-end check or
-    /// a clamped canvas makes the whole sweep unreadable, whatever the arms say.
-    func testBypassedLineEndChecksOutrankTheComparison() {
-        let decision = Kinsoku.decide(
+    /// Measurement validity outranks both questions: a bypassed line-end check or
+    /// a clamped canvas says nothing about the tag OR about CoreText.
+    func testBypassedLineEndChecksMakeBothQuestionsUnanswerable() {
+        let assessment = Kinsoku.assess(
             tagged: violations(start: 3, end: 0, hardBreak: 30, inspected: 0),
             untagged: violations(start: 3, end: 0, hardBreak: 30, inspected: 0),
             contentHeight: 1_000,
             canvasHeight: 1_000_000
         )
-        XCTAssertEqual(decision.execution, .inconclusive)
-        XCTAssertNil(decision.finding)
+        XCTAssertEqual(assessment.baseline.execution, .inconclusive)
+        XCTAssertEqual(assessment.tagEffect.execution, .inconclusive)
+        XCTAssertNil(assessment.baseline.finding)
+        XCTAssertNil(assessment.tagEffect.finding)
     }
 
-    func testClampedCanvasOutranksTheComparison() {
+    func testClampedCanvasMakesBothQuestionsUnanswerable() {
         let canvas = 1_000_000.0
-        let decision = Kinsoku.decide(
+        let assessment = Kinsoku.assess(
             tagged: violations(start: 0, end: 0, hardBreak: 30, inspected: 200),
             untagged: violations(start: 5, end: 0, hardBreak: 30, inspected: 200),
             contentHeight: canvas * Kinsoku.canvasHeadroom,
             canvasHeight: canvas
         )
-        XCTAssertEqual(decision.execution, .inconclusive)
-        XCTAssertNil(decision.finding)
+        XCTAssertEqual(assessment.baseline.execution, .inconclusive)
+        XCTAssertEqual(assessment.tagEffect.execution, .inconclusive)
     }
 
     /// Just inside the headroom is fine; the limit itself is not.
     func testCanvasHeadroomBoundary() {
         let canvas = 1_000_000.0
-        func decide(_ contentHeight: Double) -> Kinsoku.Decision {
-            Kinsoku.decide(
+        func assess(_ contentHeight: Double) -> Kinsoku.Assessment {
+            Kinsoku.assess(
                 tagged: violations(start: 0, end: 0, hardBreak: 30, inspected: 200),
                 untagged: violations(start: 1, end: 0, hardBreak: 30, inspected: 200),
                 contentHeight: contentHeight,
                 canvasHeight: canvas
             )
         }
-        XCTAssertEqual(decide(canvas * 0.5).execution, .measured)
-        XCTAssertEqual(decide(canvas * 0.89).execution, .measured)
-        XCTAssertEqual(decide(canvas * 0.91).execution, .inconclusive)
-        XCTAssertEqual(decide(canvas).execution, .inconclusive)
+        XCTAssertEqual(assess(canvas * 0.5).baseline.execution, .measured)
+        XCTAssertEqual(assess(canvas * 0.89).baseline.execution, .measured)
+        XCTAssertEqual(assess(canvas * 0.91).baseline.execution, .inconclusive)
+        XCTAssertEqual(assess(canvas).baseline.execution, .inconclusive)
     }
 
     func testViolationsAccumulate() {
