@@ -287,8 +287,18 @@ public enum SpikeB {
             to: outputDirectory.appendingPathComponent("page-0.png")
         ))
 
+        // `TextLayout.layout` already built this frame; `requireFrame` is only
+        // the fallback for when it did not produce one. Spelled as a statement
+        // rather than `rubyFrame ?? try requireFrame(...)`: `try` may not sit to
+        // the right of `??`.
+        let rubyFrameToRender: CTFrame
+        if let rubyFrame {
+            rubyFrameToRender = rubyFrame
+        } else {
+            rubyFrameToRender = try requireFrame(rubyInput)
+        }
         let rubyArtifact = ArtifactRecord(byteCount: try Renderer.writePNG(
-            frame: rubyFrame ?? try requireFrame(rubyInput),
+            frame: rubyFrameToRender,
             size: CGSize(width: 400, height: 120),
             to: outputDirectory.appendingPathComponent("ruby.png")
         ))
