@@ -107,7 +107,7 @@ public enum WhitespaceFolding {
                 continue
             }
             if pendingSeparator {
-                if !output.isEmpty { output.append(" ") }
+                if !output.isEmpty, output.last != " " { output.append(" ") }
                 pendingSeparator = false
             }
             output.append(character)
@@ -124,6 +124,20 @@ public enum WhitespaceFolding {
 public enum XHTMLToCanonical {
     /// Elements whose subtrees do not occupy the axis — ADR-0005.
     static let axisExcluded: Set<String> = ["rt", "rp"]
+
+    /// Elements outside the reading flow.
+    ///
+    /// `head` is metadata. A `<title>` is not something a reader scrolls past,
+    /// so letting its text into the canonical text shifts every offset in the
+    /// body by a constant and makes "the canonical text" something other than
+    /// what the reader sees. The first CI run said so: a paragraph that should
+    /// have started at 0 started at 9, because `第一章` appeared twice — once in
+    /// the title and once in the heading.
+    static let flowExcluded: Set<String> = ["head"]
+
+    static func isExcluded(_ name: String) -> Bool {
+        axisExcluded.contains(name) || flowExcluded.contains(name)
+    }
 
     public static func build(from xhtml: String) throws -> CanonicalText {
         let builder = XHTMLBuilder()
@@ -179,7 +193,7 @@ private final class XHTMLBuilder: NSObject, XMLParserDelegate {
             excludedDepth += 1
             return
         }
-        if XHTMLToCanonical.axisExcluded.contains(name) {
+        if XHTMLToCanonical.isExcluded(name) {
             excludedDepth = 1
             return
         }
@@ -202,8 +216,13 @@ private final class XHTMLBuilder: NSObject, XMLParserDelegate {
         // when this element's first character arrives, and lands inside this
         // element's range — so `<p>前</p><p>空白</p>` would report the second
         // paragraph as " 空白" and every offset in it would be one out.
+        // The `last != " "` guard matters: the element's own leading whitespace
+        // still sets the flag again, and without it the separator emitted here
+        // and the one owed by that whitespace would both land — producing
+        // "空白" with two spaces in front. The first CI run reported exactly
+        // that.
         if pendingSeparator, !output.isEmpty {
-            output.append(" ")
+            if output.last != " " { output.append(" ") }
             pendingSeparator = false
         }
 

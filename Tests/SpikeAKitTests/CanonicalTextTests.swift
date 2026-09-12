@@ -35,6 +35,23 @@ final class CanonicalTextTests: XCTestCase {
         XCTAssertEqual(annotated.string, plain.string)
     }
 
+    /// `<head>` is metadata, not reading flow. A `<title>` is not something a
+    /// reader scrolls past, so counting it shifts every offset in the body by a
+    /// constant — which the first CI run caught as a paragraph starting at 9
+    /// rather than 0, because `第一章` appeared in the title and the heading.
+    func testHeadIsNotPartOfTheCanonicalText() throws {
+        let text = try XHTMLToCanonical.build(from: """
+        <?xml version="1.0" encoding="utf-8"?>
+        <html xmlns="http://www.w3.org/1999/xhtml">
+        <head><title>第一章</title></head>
+        <body><p id="p">正文</p></body>
+        </html>
+        """)
+        XCTAssertEqual(text.string, "正文")
+        XCTAssertFalse(text.string.contains("第一章"))
+        XCTAssertEqual(text.element(withID: "p")?.utf16Range.lowerBound, 0)
+    }
+
     // MARK: - The folding rule
 
     func testWhitespaceCollapsesToASingleSpace() throws {

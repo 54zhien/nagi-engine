@@ -65,7 +65,18 @@ final class IdentityTests: XCTestCase {
         }
         XCTAssertEqual(position.unitID, "OEBPS/chap1.xhtml")
         XCTAssertEqual(position.nodeID, .explicitID("p1"))
-        XCTAssertEqual(position.utf16Offset, 0, "p1 is the first text in the body")
+
+        // The invariant, rather than a constant: the offset is the element's
+        // start, whatever the text before it happens to measure. The first CI
+        // run pinned a literal 0 here and got 9 — because `<title>第一章</title>`
+        // was being counted as reading flow. That is now excluded, but the
+        // assertion states the property instead of a number so the next such
+        // change fails somewhere meaningful.
+        let p1 = try XCTUnwrap(
+            try document().unit(withID: "OEBPS/chap1.xhtml")?.canonical.element(withID: "p1")
+        )
+        XCTAssertEqual(position.utf16Offset, p1.utf16Range.lowerBound)
+        XCTAssertEqual(p1.utf16Range.lowerBound, 0, "with `head` excluded, the first heading starts the text")
     }
 
     /// The same id exists in both chapters at the same path with the same text.
@@ -241,11 +252,18 @@ final class IdentityTests: XCTestCase {
         XCTAssertEqual(trip.outcome, .exact)
     }
 
-    /// The bridge is faithful, and that includes being faithful to an offset
-    /// that is not a text boundary: it neither produces nor repairs one. Snapping
-    /// is `PositionResolver`'s job (ADR-0004), and this is the evidence for
-    /// keeping that layer separate.
-    func testAnOffsetInsideASurrogatePairIsCarriedThroughUnchanged() throws {
+    /// A finding rather than a defect, and it was the first CI run that produced
+    /// it: **a fragment names a whole element, so it cannot carry an offset
+    /// inside one.** Any offset that is not the element's start is lost on the
+    /// way back.
+    ///
+    /// The fixture puts the offset in the middle of a non-BMP character, which
+    /// makes the loss visible, but the loss would be identical for an offset at
+    /// character five of a paragraph. Closing the gap needs a mechanism this
+    /// bridge does not emit — `domRange` with `charOffset`, say — and Readium's
+    /// own JavaScript producer does not emit one either (`dom.js:55-67`), so the
+    /// gap is real on both sides rather than a shortcut taken here.
+    func testSubElementPrecisionIsLostThroughAFragmentAnchoredLocator() throws {
         let document = try document()
         let unit = try XCTUnwrap(document.unit(withID: "OEBPS/chap3.xhtml"))
         let astral = try XCTUnwrap(unit.canonical.element(withID: "astral"))
@@ -258,8 +276,30 @@ final class IdentityTests: XCTestCase {
             label: "native-inside-surrogate-pair"
         )
         XCTAssertTrue(
-            trip.fields["utf16Offset"] == .reproduced,
-            "the bridge does not round, and does not snap"
+            trip.fields["utf16Offset"] == .lost,
+            "a fragment names the element, not an offset within it"
         )
+        guard case .loses(let fields) = trip.outcome else {
+            return XCTFail("expected the offset to be reported as lost, got \(trip.outcome)")
+        }
+        XCTAssertTrue(fields.contains("utf16Offset"))
+    }
+
+    /// The other half of the same finding: the element identity itself does
+    /// survive, so what comes back is the right paragraph with the wrong
+    /// position inside it. That is the worst shape of failure for an annotation
+    /// — plausible, and off by a few characters.
+    func testTheElementSurvivesEvenWhenTheOffsetDoesNot() throws {
+        let document = try document()
+        let unit = try XCTUnwrap(document.unit(withID: "OEBPS/chap1.xhtml"))
+        let p4 = try XCTUnwrap(unit.canonical.element(withID: "p4"))
+
+        let trip = RoundTripHarness.nativeToLocatorToNative(
+            NativePosition(unitID: unit.id, nodeID: .explicitID("p4"), utf16Offset: p4.utf16Range.lowerBound + 5),
+            in: document,
+            label: "native-mid-paragraph"
+        )
+        XCTAssertTrue(trip.fields["nodeID"] == .reproduced, "the paragraph is still named correctly")
+        XCTAssertTrue(trip.fields["utf16Offset"] == .lost, "but the place inside it is not")
     }
 }
