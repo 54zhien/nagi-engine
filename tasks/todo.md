@@ -18,22 +18,22 @@
 - [x] 测试同步（`carried` 改名 + 新增两处断言）
 - [ ] **未做**：`compare` 的判定输入改为 `Resolution.discarded`（今天仍无人读取）；ADR 更新
 
-### 阶段二：metric 矩阵 —— 计划全文见 `C:\Users\Azusa\.claude\plans\immutable-jingling-dragonfly.md`
+### 阶段二：metric 矩阵 ✅ 已完成（`e2c23ec` + `d430736`，CI run 34679508081 两 gate 全绿）
 
-**先调用**：`/codebase-design`、`/domain-modeling`（已调）；完成前 `/code-review`。
+**先调用**：`/codebase-design`、`/domain-modeling`（已调）；完成后两个独立审查代理（一个攻设计、一个攻无编译器下的语法与算术）。
 
-- [ ] `PublicationProgressMetric` / `Progression { value, metric }` —— **metric 非可选**，闭合 ADR-0009:73
-- [ ] `ProgressMetricAxis`（构造式捕获，无 `in document:`）+ 泛型 `PublicationProgressService`（**抛错不夹取**）
-- [ ] `CanonicalTextIndexAxis` 吸收并删除 `Document.progression(of:)` / `totalProgression(of:)`；清两处过期注释
-- [ ] **`locator(from:)` 的 per-unit 算术必须原样保留**（`locations.progression` 是 per-resource 语义，轴的 `progression` 是出版级；换过去会让 `native-path-anchored` 从 22 反算成 9 而**桶和仍是 19**）
-- [ ] `locator(from:)` → `LocatorExport?`，在丢标签处记 `"progression.metric"`；`native(from:)` 一行不动
-- [ ] `ByteResource`（`Sendable`；字节↔文本映射走**前缀解码**，不写扫描器）+ 三个 `pageRanges` 声明（nil / 2 页 / 4 页，**只用 2 的幂**）
-- [ ] fixture：空 unit 插在 chap2 与 chap3 之间
-- [ ] `RoundTrip` 加 `discarded` / `derivedFrom`（让 `Resolution.discarded` 第一次进入 artifact）
-- [ ] 报告加 `readingOrderUTF16Length`（**4 个写入点**，漏一个就静默不进指纹）
-- [ ] 四个 probe，每条点名**能把它翻成 `no` 的变异**；**每个 service 调用必须 `do/catch`**，否则轴行为不端会把 `no` 变成红 Gate 2
-- [ ] `layout-independence` 的三臂必须建在**同一份 `ByteResource`** 上（否则是 `nil == nil`）
-- [ ] ADR-0009 / 0008、测试、`main.swift`
+- [x] `PublicationProgressMetric` / `Progression { value, metric }` —— **metric 非可选**，闭合 ADR-0009:73
+- [x] `ProgressMetricAxis`（构造式捕获，无 `in document:`）+ **泛型** `PublicationProgressService`（**抛错不夹取**）
+- [x] `CanonicalTextIndexAxis` 吸收并删除 `Document.progression(of:)` / `totalProgression(of:)`；清两处过期注释
+- [x] **`locator(from:)` 的 per-unit 算术原样保留** —— 这是审查代理抓到的会**静默毁掉旗舰行**的陷阱
+- [x] `locator(from:)` → `LocatorExport?`，在丢标签处记 `"progression.metric"`；`native(from:)` 一行不动
+- [x] `ByteResource`（`Sendable`；字节↔文本映射走**前缀解码**）+ 三个 `pageRanges` 声明（nil / 2 页 / 4 页）
+- [x] fixture：空 unit 插在 chap2 与 chap3 之间
+- [x] `RoundTrip` 加 `discarded` / `derivedFrom`；**`Resolution.discarded` 第一次进入 artifact**
+- [x] 报告加 `readingOrderUTF16Length`（5 个写入点）
+- [x] 四个 probe；**每个 service 调用都 `do/catch`**
+- [x] `layout-independence` 三臂建在**同一份 `ByteResource`** 上
+- [x] ADR-0009 / 0008、测试、`main.swift`
 
 ## 已完成：Spike A 第二轮 —— 让往返契约回到它真正成立的样子
 
@@ -99,6 +99,57 @@ Spike B 已封版于 `763e2c9`（证明了 Nagi 能掌握**排版**）。Spike A
 计划里「不动 Spike B 的任何文件」。实际改了 `Sources/SpikeKit/Report.swift` **一处**：给 `DeterminismRecord` 加了 `public init`。原因是 `SpikeAKit` 是另一个模块，合成 memberwise init 是 internal，不暴露就构造不了。**纯增量**，Spike B 行为不变，其测试仍在跑。
 
 ## Review
+
+### 第三轮阶段二：metric 矩阵（run 34679508081，两 gate 全绿，commit `d430736`）
+
+```
+Gate 1   135 tests, 0 failures        （阶段一后是 116，本轮 +19）
+Gate 2   Spike A 跨进程指纹 b3b3a413… 在 a-run1/2/3 均一致 → MEASURED / yes
+
+progress-monotonicity        MEASURED yes  16 位置 / 0 递减 / 0 前缀和错位 / 空 unit 首尾相等 1-of-1 / 全空文档 nil
+progress-layout-independence MEASURED yes  sourceBytes 动 0、fixedPageOrdinal 动 5、canonicalTextIndex 动 0、可重排资源给页序号 0
+progress-bounded-seek        MEASURED yes  13 请求 0 错位、max snap 2 vs 声明 3、危险命中 4/2/1、9 次翻页往返 0 失败
+progress-provenance          MEASURED yes  写进字段 0.289474（per-resource）≠ 0.117647（出版级）；carried 1-of-5 有载体；27 个丢弃名全部可解释
+
+identity-round-trip  20 cases: 5 exact, 5 recomputed-equivalent, 1 semantic-equivalent,
+                     3 losing fields, 0 blocked, 6 needing a reanchor
+```
+
+#### 本轮真正立住的四条
+
+1. **metric 身份随数值一起走。** `Progression.metric` 非可选，所以想拿裸 `Double` 必须显式丢标签 —— 而那个丢弃点被记进 `discarded`，artifact 里看得见（`progression.metric`）。
+2. **`locations.progression` 是 per-resource，轴的 `progression` 是出版级。** 这不是学究式区分：`native(from:)` 按 `unit.length` 反算它。换过去会让 `native-path-anchored` 的 22 反算成 9、该行从 `recomputedEquivalent` 掉进 `loses(["utf16Offset"])`，而**分划桶和仍然等于 20**。审查代理在推 CI 前抓到，现在有测试（`testTheProgressionWrittenIntoTheLocatorIsPerResource`）钉住，且 probe 把两个候选数都报出来。
+3. **准入判据从一句话变成一次测量。** 容器声明了分页 → 页序号存在且随声明变化；没声明 → 一律 `nil`。可重排资源给出页序号 0 次。
+4. **`Resolution.discarded` 第一次被读。** 此前不只是没人读，是在唯一调用点被裸 `_` 丢掉。它还暴露出 `.ambiguous` / `.unresolvable` 两个 case **拿着算好的列表却无处安放** —— 一次「解析失败」于是报告「什么都没丢」。修完日志里能直接看到：`quotation-repeated` 丢 `text`、`unknown-href-with-fallback` 丢 `href`、`fragment-names-nothing` 丢 `fragments`、`global-position-only` 丢 `position`。
+
+#### 第一次 CI 读数抓到的空转（`d430736` 修）
+
+`progress-provenance` 报了 `yes`，而 `carriedRows = 0` —— 语料里**没有一行**能把 offset 报成 `.carried`（四个 native-first 用例不是丢 offset 就是重算），于是「`.carried` 必须有载体」这一臂无物可查，靠「没有东西可以失败」通过。
+
+修法是两条一起：语料补 `native-id-anchored-at-element-start`（偏移正好是元素起点，因此可 `.carried`），probe 在覆盖计数为 0 时报 `inconclusive` 而非 `yes`。**读数随之变化且可见**：cases 19→20、exact 4→5，其余桶不动。
+
+这与 `native-path-anchored` 当年「零覆盖所以长期判错」是同一个病，只是这次是断言侧而非判定侧。
+
+#### 偏离计划的两处（评审时先拍板）
+
+1. `progression(of:)` 返回 `Progression?` 而非裸 `Double?` —— 草图会在唯一需要标签的那一层把标签丢掉。
+2. document / resource 改为**构造时捕获**，去掉每个方法的 `in document:` —— 三个 conformer 里两个根本不看 document。
+
+#### 靠审查（而非 CI）抓到的其它四处
+
+- `ByteResource` 漏 `Sendable`（显式 `Sendable` 类型里放非 `Sendable` 存储属性是硬错误）。
+- `ProgressProbes` 的 `pageCountBefore/After` 写成了字面量 —— fixture 改了它还会说「2 -> 4」，正是本轮加 `readingOrderUTF16Length` 要消灭的那类数。
+- `monotonicity` 的注释宣称有「无空 unit 就 inconclusive」的保护，代码里没有。
+- `ProgressMetricTests` 里那条 `Progression` 不等断言是合成 `==` 上的恒真式，改成「同一位置两个 metric 给出不同的数」。
+
+`"fragments"` 是我这轮新加进 `discarded` 的词，而可解释名单里没有它 —— **provenance 的 tripwire 当场会报 `no` 并点出这个词**，修在推之前。
+
+#### 未做（各自独立）
+
+- `compare` 的逐行重写（判定输入改为 `discarded`）。
+- `ReanchorService` 的模糊匹配（仍只判定「需要它」，本轮 6 例）。
+- `readiumPositions` / `custom` 两个 metric：没有 archive 可测，且 `custom` 是实现一种不存在的 metric。**不是欠账，是范围。**
+- ADR-0003 的文档序键。
 
 ### 第三轮阶段一：把测量规则冻结成结构（run 34677720492，两 gate 全绿，commit `5984b84`）
 
