@@ -17,6 +17,7 @@ let package = Package(
         .macOS(.v13)
     ],
     products: [
+        .executable(name: "spike-a", targets: ["SpikeA"]),
         .executable(name: "spike-b", targets: ["SpikeB"])
     ],
     targets: [
@@ -28,6 +29,21 @@ let package = Package(
                 .copy("Resources/NagiRounded-Regular.ttf")
             ]
         ),
+        // Spike A reuses SpikeKit's reporting primitives (Quantize, SHA256,
+        // ProbeOutcome, ArtifactManifest, DeterminismRecord, ReportIO) rather
+        // than restating them. That makes `SpikeKit` stand for two things at
+        // once — Spike B's kit and the shared reporting primitives — which is
+        // a name that will need splitting the day a third spike appears.
+        // Deferred on purpose: Spike B is sealed, and re-partitioning it to
+        // tidy a name is not worth the churn yet.
+        .target(
+            name: "SpikeAKit",
+            dependencies: ["SpikeKit"]
+        ),
+        .executableTarget(
+            name: "SpikeA",
+            dependencies: ["SpikeAKit"]
+        ),
         .executableTarget(
             name: "SpikeB",
             dependencies: ["SpikeKit"]
@@ -35,6 +51,10 @@ let package = Package(
         .testTarget(
             name: "SpikeKitTests",
             dependencies: ["SpikeKit"]
+        ),
+        .testTarget(
+            name: "SpikeAKitTests",
+            dependencies: ["SpikeAKit"]
         )
     ]
 )

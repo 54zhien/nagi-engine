@@ -311,6 +311,23 @@ public struct DeterminismRecord: Codable, Sendable {
     public var execution: ProbeOutcome.Execution
     public var finding: ProbeOutcome.Finding?
     public var detail: String
+
+    /// Public because a second spike target reuses this type, and the
+    /// synthesised memberwise initialiser is internal to `SpikeKit`. Purely
+    /// additive: nothing Spike B does changes.
+    public init(
+        fingerprint: String,
+        expectedFingerprint: String?,
+        execution: ProbeOutcome.Execution,
+        finding: ProbeOutcome.Finding?,
+        detail: String
+    ) {
+        self.fingerprint = fingerprint
+        self.expectedFingerprint = expectedFingerprint
+        self.execution = execution
+        self.finding = finding
+        self.detail = detail
+    }
 }
 
 /// The whole artifact. Compared by the golden gate.

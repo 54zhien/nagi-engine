@@ -71,6 +71,23 @@ jobs:
           cmp "$OUT/run1/spike-b.fingerprint" "$OUT/run2/spike-b.fingerprint"
           cmp "$OUT/run1/spike-b.fingerprint" "$OUT/run3/spike-b.fingerprint"
 
+      # Spike A, the same shape: three processes, one baseline. Identity is
+      # even more exposed to process-level drift than typography is, because
+      # the payload is built from dictionary traversal and path arithmetic.
+      - name: Spike A baseline run
+        run: swift run spike-a --out "$OUT/a-run1"
+
+      - name: Spike A second process, compared against its baseline
+        run: swift run spike-a --out "$OUT/a-run2" --expect "$OUT/a-run1/spike-a.fingerprint"
+
+      - name: Spike A third process, compared against its baseline
+        run: swift run spike-a --out "$OUT/a-run3" --expect "$OUT/a-run1/spike-a.fingerprint"
+
+      - name: Compare Spike A fingerprints
+        run: |
+          cmp "$OUT/a-run1/spike-a.fingerprint" "$OUT/a-run2/spike-a.fingerprint"
+          cmp "$OUT/a-run1/spike-a.fingerprint" "$OUT/a-run3/spike-a.fingerprint"
+
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
