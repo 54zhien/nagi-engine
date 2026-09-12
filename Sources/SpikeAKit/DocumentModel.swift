@@ -48,29 +48,21 @@ public struct Document: Sendable {
         readingOrder.first { $0.id == id }
     }
 
-    /// **This spike's progression model, not Readium's.**
-    ///
-    /// Readium's `EPUBPositionsService` derives positions from *byte* length
-    /// (`pageLength = 1024`) and emits `progression = (position - 1) / positionCount`
-    /// (`EPUBPositionsService.swift:44-58`, `:137-144`), while its navigator
-    /// inverts with `ceil(progression * (count - 1))`
-    /// (`EPUBViewportAndLocationCalculator.swift:68`) — two indexings that do not
-    /// agree with each other. Neither can be run here.
-    ///
-    /// What this does instead is the simplest thing that is self-consistent:
-    /// progression is a fraction of the unit's canonical *text* length, and
-    /// `totalProgression` is a fraction of the whole publication's. It is stated
-    /// as a model so that a later reader cannot mistake it for a measurement.
-    public func progression(of position: NativePosition) -> Double? {
-        guard let unit = unit(withID: position.unitID), unit.length > 0 else { return nil }
-        return Double(position.utf16Offset) / Double(unit.length)
-    }
-
-    public func totalProgression(of position: NativePosition) -> Double? {
-        guard totalLength > 0,
-              let index = readingOrder.firstIndex(where: { $0.id == position.unitID })
-        else { return nil }
-        let before = readingOrder[..<index].reduce(0) { $0 + $1.length }
-        return Double(before + position.utf16Offset) / Double(totalLength)
-    }
+    // `progression(of:)` and `totalProgression(of:)` used to live here, and they
+    // are gone on purpose. They were two unlabelled fractions over two different
+    // denominators — the unit's length and the publication's — under names that
+    // did not say which, and the bridge wrote one of them into a locator field
+    // whose EPUB semantics are neither (see `LocationBridge.locator(from:in:)`).
+    //
+    // `progression` is now stated once, on `CanonicalTextIndexAxis`, where it
+    // carries the metric it is a fraction of.
+    //
+    // The model the old comment recorded is still worth keeping, because it is
+    // the reason a metric has to be named at all: Readium's `EPUBPositionsService`
+    // derives positions from **byte** length (`pageLength = 1024`) and emits
+    // `progression = (position - 1) / positionCount` (`EPUBPositionsService.swift:44-58`,
+    // `:137-144`), while its navigator inverts with `ceil(progression * (count - 1))`
+    // (`EPUBViewportAndLocationCalculator.swift:68`). Those are two indexings that
+    // do not agree with each other, and neither is the text-length model this
+    // spike uses. A bare `Double` cannot tell them apart.
 }

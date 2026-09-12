@@ -20,10 +20,10 @@ public enum Resolution: Sendable, Hashable {
     /// The locator's own information admits more than one position. Readium's
     /// JavaScript produces exactly this shape: `dom.js:55-67` emits a
     /// `cssSelector` plus an unbounded `text.highlight` and nothing else.
-    case ambiguous([NativePosition])
+    case ambiguous([NativePosition], discarded: [String])
 
     /// Structurally impossible, with the reason spelled out.
-    case unresolvable(String)
+    case unresolvable(String, discarded: [String])
 
     public var position: NativePosition? {
         switch self {
@@ -33,11 +33,39 @@ public enum Resolution: Sendable, Hashable {
         }
     }
 
+    /// **Every case carries this, including the two that carry no position.**
+    ///
+    /// It used to be computed for all four and returned for only two, so a case
+    /// that failed to resolve reported that nothing was dropped — even when the
+    /// bridge had already filtered a quotation or an href into a list it then
+    /// threw away. A refusal is not the same as an empty list, and the report is
+    /// read by people who cannot tell the difference unless the type makes them
+    /// able to.
     public var discarded: [String] {
         switch self {
-        case .structural(_, let discarded), .approximate(_, _, let discarded): return discarded
-        case .ambiguous, .unresolvable: return []
+        case .structural(_, let discarded): return discarded
+        case .approximate(_, _, let discarded): return discarded
+        case .ambiguous(_, let discarded): return discarded
+        case .unresolvable(_, let discarded): return discarded
         }
+    }
+}
+
+/// What came back from a Native Position, and what the locator had nowhere to
+/// put.
+///
+/// The mirror's `locations.progression` is a bare `Double?` because that is
+/// Readium's shape, so the metric label has to come off to fit. **That drop is
+/// the defect ADR-0009:73 describes**, and it is now recorded at the point it
+/// happens instead of being performed silently — which is the difference between
+/// a known limitation and a bug nobody can see.
+public struct LocatorExport: Sendable, Hashable, Codable {
+    public var locator: ReadiumLocator
+    public var discarded: [String]
+
+    public init(locator: ReadiumLocator, discarded: [String]) {
+        self.locator = locator
+        self.discarded = discarded
     }
 }
 
@@ -63,21 +91,10 @@ public enum LocationBridge {
     /// bridge always walks the whole way down — unit, then node, then offset —
     /// and says which of them it used.
     public static func native(from locator: ReadiumLocator, in document: Document) -> Resolution {
-        let unit: DocumentUnit
-        let unitBasis: String
-        if let match = document.unit(withHref: locator.href) {
-            unit = match
-            unitBasis = "href"
-        } else if let total = locator.locations.totalProgression,
-                  let fallback = document.unit(coveringTotalProgression: total) {
-            unit = fallback
-            unitBasis = "totalProgression"
-        } else {
-            return .unresolvable(
-                "href \(locator.href) matches no unit, and no totalProgression was supplied to fall back on"
-            )
-        }
-
+        // Computed **before** anything resolves, because these are fields the
+        // locator carries and a Native Position can never hold: they are dropped
+        // whether or not the resolution succeeds. Discovering them only on the
+        // success paths is how a refusal came to report that nothing was lost.
         var discarded = notCarriableByNativePosition.filter { field in
             switch field {
             case "title": return locator.title != nil
@@ -85,7 +102,21 @@ public enum LocationBridge {
             default: return false
             }
         }
-        if unitBasis != "href" { discarded.append("href") }
+
+        let unit: DocumentUnit
+        if let match = document.unit(withHref: locator.href) {
+            unit = match
+        } else if let total = locator.locations.totalProgression,
+                  let fallback = document.unit(coveringTotalProgression: total) {
+            unit = fallback
+            // The href named nothing; a different field is what found the unit.
+            discarded.append("href")
+        } else {
+            return .unresolvable(
+                "href \(locator.href) matches no unit, and no totalProgression was supplied to fall back on",
+                discarded: discarded + ["href"]
+            )
+        }
 
         // A structural anchor beats a number, so ids are tried first — the same
         // order Readium's JavaScript uses (`utils.js:319-330`).
@@ -103,7 +134,10 @@ public enum LocationBridge {
             // A fragment that names nothing is not a resolution failure to paper
             // over by falling through to a number — it is a broken anchor, and
             // saying so is the point.
-            return .unresolvable("fragment \"\(fragment)\" matches no element id in \(unit.href)")
+            return .unresolvable(
+                "fragment \"\(fragment)\" matches no element id in \(unit.href)",
+                discarded: discarded + ["fragments"]
+            )
         }
 
         if let selector = locator.locations.cssSelector {
@@ -111,11 +145,17 @@ public enum LocationBridge {
             // approximated, because a wrong answer here is indistinguishable
             // from a right one in the artifact.
             guard selector.hasPrefix("#"), selector.count > 1 else {
-                return .unresolvable("cssSelector \"\(selector)\" is not a plain #id selector, which is all this spike resolves")
+                return .unresolvable(
+                    "cssSelector \"\(selector)\" is not a plain #id selector, which is all this spike resolves",
+                    discarded: discarded + ["cssSelector"]
+                )
             }
             let id = String(selector.dropFirst())
             guard let element = unit.canonical.element(withID: id) else {
-                return .unresolvable("cssSelector \"\(selector)\" matches no element id in \(unit.href)")
+                return .unresolvable(
+                    "cssSelector \"\(selector)\" matches no element id in \(unit.href)",
+                    discarded: discarded + ["cssSelector"]
+                )
             }
             return .structural(
                 NativePosition(unitID: unit.id, nodeID: .explicitID(id), utf16Offset: element.utf16Range.lowerBound),
@@ -125,7 +165,10 @@ public enum LocationBridge {
 
         if let progression = locator.locations.progression {
             guard unit.length > 0 else {
-                return .unresolvable("\(unit.href) carries no text, so a progression has nothing to point into")
+                return .unresolvable(
+                    "\(unit.href) carries no text, so a progression has nothing to point into",
+                    discarded: discarded + ["progression"]
+                )
             }
             // Clamped, because a progression outside 0...1 is a value Readium
             // will happily store and this bridge must still do something
@@ -138,7 +181,10 @@ public enum LocationBridge {
             } else if let last = unit.canonical.elements.last {
                 nodeID = last.explicitID.map { NodeID.explicitID($0) } ?? .path(last.path)
             } else {
-                return .unresolvable("\(unit.href) has no addressable elements")
+                return .unresolvable(
+                    "\(unit.href) has no addressable elements",
+                    discarded: discarded + ["progression"]
+                )
             }
             return .approximate(
                 NativePosition(unitID: unit.id, nodeID: nodeID, utf16Offset: offset),
@@ -155,7 +201,8 @@ public enum LocationBridge {
             // and therefore cannot carry it — and a bridge that guessed would be
             // inventing a position numbering the publication never stated.
             return .unresolvable(
-                "a global `position` (\(position)) cannot be resolved without the publication's positions table, which is document-level state rather than a coordinate"
+                "a global `position` (\(position)) cannot be resolved without the publication's positions table, which is document-level state rather than a coordinate",
+                discarded: discarded + ["position"]
             )
         }
 
@@ -163,15 +210,21 @@ public enum LocationBridge {
             // Only the quote, no structural anchor and no number. This is the
             // "repeated text" case by construction: the bridge can find every
             // place the text occurs and cannot choose between them.
+            //
+            // `discarded` already names `text` — that is the whole finding of
+            // this case, and it is a drop like any other.
             let matches = unit.canonical.elements(withText: locator.text.highlight ?? "")
             if matches.count > 1 {
-                return .ambiguous(matches.map { element in
-                    NativePosition(
-                        unitID: unit.id,
-                        nodeID: element.explicitID.map { NodeID.explicitID($0) } ?? .path(element.path),
-                        utf16Offset: element.utf16Range.lowerBound
-                    )
-                })
+                return .ambiguous(
+                    matches.map { element in
+                        NativePosition(
+                            unitID: unit.id,
+                            nodeID: element.explicitID.map { NodeID.explicitID($0) } ?? .path(element.path),
+                            utf16Offset: element.utf16Range.lowerBound
+                        )
+                    },
+                    discarded: discarded
+                )
             }
             if let only = matches.first {
                 return .approximate(
@@ -186,7 +239,13 @@ public enum LocationBridge {
             }
         }
 
-        return .unresolvable("the locator carries nothing this bridge can resolve: no fragment, cssSelector, progression, position or matching text")
+        // `unknown-href-with-fallback` lands here, and its `discarded` names the
+        // href — which is the only thing that found the unit and still could not
+        // name a place inside it. That list used to be empty.
+        return .unresolvable(
+            "the locator carries nothing this bridge can resolve: no fragment, cssSelector, progression, position or matching text",
+            discarded: discarded
+        )
     }
 
     /// Native Position → Publication Position.
@@ -199,7 +258,7 @@ public enum LocationBridge {
     public static func locator(
         from position: NativePosition,
         in document: Document
-    ) -> ReadiumLocator? {
+    ) -> LocatorExport? {
         guard let unit = document.unit(withID: position.unitID) else { return nil }
         let element = unit.canonical.innermostElement(containing: position.utf16Offset)
 
@@ -210,24 +269,52 @@ public enum LocationBridge {
             fragments = [id]
         }
 
-        return ReadiumLocator(
-            href: unit.href,
-            mediaType: unit.mediaType,
-            title: nil,
-            locations: ReadiumLocator.Locations(
-                fragments: fragments,
-                progression: document.progression(of: position)
-                // `totalProgression` is left out: it is a publication-level
-                // number, and the spike has no positions table to state it from.
+        // **Per-resource, and it has to stay per-resource.**
+        //
+        // `locations.progression` is what Readium's `EPUBPositionsService` mints
+        // per resource, and `native(from:)` above inverts it against
+        // `unit.length`. `CanonicalTextIndexAxis.progression` is a fraction of
+        // the whole *publication* — a different number that names a different
+        // place. The two are one substitution apart, and that substitution is
+        // quiet: `native-path-anchored`'s offset 22 would come back as 9, the row
+        // would fall from `recomputedEquivalent` into `loses(["utf16Offset"])`,
+        // and **the census buckets would still sum to the number of rows**. Only
+        // the value would be wrong.
+        //
+        // The metric cannot come along — the field is a bare `Double?` because
+        // that is Readium's shape — so the drop is recorded here.
+        var progression: Double?
+        var discarded: [String] = []
+        if unit.length > 0 {
+            let perUnit = Progression(
+                value: Double(position.utf16Offset) / Double(unit.length),
+                metric: .canonicalTextIndex
+            )
+            progression = perUnit.value
+            discarded.append("progression.metric")
+        }
+
+        return LocatorExport(
+            locator: ReadiumLocator(
+                href: unit.href,
+                mediaType: unit.mediaType,
+                title: nil,
+                locations: ReadiumLocator.Locations(
+                    fragments: fragments,
+                    progression: progression
+                    // `totalProgression` is left out: it is a publication-level
+                    // number, and the spike has no positions table to state it from.
+                ),
+                text: ReadiumLocator.Text()
             ),
-            text: ReadiumLocator.Text()
+            discarded: discarded
         )
     }
 }
 
 extension Document {
     /// The unit whose share of the publication's length covers a total
-    /// progression — this spike's model, stated in `progression(of:)`.
+    /// progression — this spike's model, stated in `CanonicalTextIndexAxis`.
     func unit(coveringTotalProgression total: Double) -> DocumentUnit? {
         guard totalLength > 0 else { return nil }
         let target = min(max(total, 0), 1) * Double(totalLength)

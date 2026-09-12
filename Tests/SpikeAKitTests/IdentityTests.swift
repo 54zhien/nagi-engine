@@ -127,7 +127,7 @@ final class IdentityTests: XCTestCase {
             from: ReadiumLocator(href: "OEBPS/chap1.xhtml", mediaType: "application/xhtml+xml", locations: .init(fragments: ["p99"])),
             in: try document()
         )
-        guard case .unresolvable(let reason) = resolution else {
+        guard case .unresolvable(let reason, _) = resolution else {
             return XCTFail("expected unresolvable, got \(resolution)")
         }
         XCTAssertTrue(reason.contains("p99"))
@@ -184,7 +184,7 @@ final class IdentityTests: XCTestCase {
             ),
             in: try document()
         )
-        guard case .ambiguous(let candidates) = resolution else {
+        guard case .ambiguous(let candidates, _) = resolution else {
             return XCTFail("expected ambiguity, got \(resolution)")
         }
         XCTAssertEqual(candidates.count, 2)
@@ -387,6 +387,90 @@ final class IdentityTests: XCTestCase {
         XCTAssertTrue(
             notes.contains { $0.contains("progression") },
             "the note has to name the channel the value was rebuilt from, or a reader will think the number changed"
+        )
+    }
+
+    /// The channel a rebuilt value came from, and every name it was dropped
+    /// under, both reach the row. The inbound half of that list used to be
+    /// pattern-discarded at its only call site (`if case .approximate(_, let
+    /// basis, _)`) — not merely unread, thrown away.
+    func testADerivedRowNamesTheChannelItWasRebuiltFrom() throws {
+        let document = try document()
+        let unit = try XCTUnwrap(document.unit(withID: "OEBPS/chap1.xhtml"))
+        let anonymous = try XCTUnwrap(
+            unit.canonical.elements.first { $0.name == "p" && $0.explicitID == nil }
+        )
+
+        let trip = RoundTripHarness.nativeToLocatorToNative(
+            NativePosition(
+                unitID: unit.id,
+                nodeID: .path(anonymous.path),
+                utf16Offset: anonymous.utf16Range.lowerBound + 1
+            ),
+            in: document,
+            label: "native-path-anchored"
+        )
+        XCTAssertEqual(trip.derivedFrom, "progression")
+        XCTAssertTrue(trip.discarded.contains("progression"), "what the bridge could not carry in")
+        XCTAssertTrue(trip.discarded.contains("progression.metric"), "what the mirror had no room for")
+    }
+
+    /// **The number written into `locations.progression` is per resource, and
+    /// that is not a detail.**
+    ///
+    /// The field's EPUB semantics are `readiumPositions`, and `native(from:)`
+    /// inverts it against `unit.length`. `CanonicalTextIndexAxis.progression` is
+    /// a fraction of the whole **publication** — a different number naming a
+    /// different place. Swapping them is one substitution away and it is quiet:
+    /// this row's offset 22 would come back as 9, the row would fall from
+    /// `recomputedEquivalent` into `loses(["utf16Offset"])`, and the census
+    /// buckets would still sum to the number of rows.
+    func testTheProgressionWrittenIntoTheLocatorIsPerResource() throws {
+        let document = try document()
+        let unit = try XCTUnwrap(document.unit(withID: "OEBPS/chap1.xhtml"))
+        let anonymous = try XCTUnwrap(
+            unit.canonical.elements.first { $0.name == "p" && $0.explicitID == nil }
+        )
+        let position = NativePosition(
+            unitID: unit.id,
+            nodeID: .path(anonymous.path),
+            utf16Offset: anonymous.utf16Range.lowerBound + 1
+        )
+
+        let exported = try XCTUnwrap(LocationBridge.locator(from: position, in: document))
+        let written = try XCTUnwrap(exported.locator.locations.progression)
+
+        // Stated as a relation against the fixture, not as a constant — this
+        // repository has pinned absolute offsets from memory and been wrong.
+        XCTAssertEqual(written, Double(position.utf16Offset) / Double(unit.length))
+
+        let atPublicationLevel = try XCTUnwrap(
+            CanonicalTextIndexAxis(document: document).progression(of: position)
+        )
+        XCTAssertNotEqual(
+            written,
+            atPublicationLevel.value,
+            "the two candidate numbers must actually differ, or this test proves nothing"
+        )
+
+        XCTAssertTrue(
+            exported.discarded.contains("progression.metric"),
+            "the label cannot come along, so the drop has to be recorded"
+        )
+    }
+
+    /// The fixture must still carry a unit with no text: the empty-unit tie is
+    /// the only place a prefix sum off by one is visible, and it disappears
+    /// silently if the fixture loses the unit.
+    func testTheFixtureStillCarriesAnEmptyUnit() throws {
+        let document = try document()
+        let blank = try XCTUnwrap(document.unit(withID: "OEBPS/blank.xhtml"))
+        XCTAssertEqual(blank.canonical.utf16Count, 0)
+        XCTAssertGreaterThan(document.readingOrder.count, 1)
+        let index = try XCTUnwrap(document.readingOrder.firstIndex { $0.id == blank.id })
+        XCTAssertTrue(
+            index > 0 && index < document.readingOrder.count - 1,
+            "it has to sit between two units with text, or it has no neighbour to tie with"
         )
     }
 }

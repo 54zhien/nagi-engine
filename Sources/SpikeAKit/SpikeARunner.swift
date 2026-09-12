@@ -11,6 +11,14 @@ public enum SpikeA {
     ) throws -> SpikeAReport {
         let document = try SpikeAFixture.document()
 
+        // **This is the transcript artifact's text, not the metric's.**
+        //
+        // The separator between units is a byte of punctuation that no metric
+        // counts: `canonicalTextIndex` divides by `Document.totalLength`, which
+        // is the plain sum of the units' lengths, so this string is longer than
+        // the reading order by one separator per gap. The report carries both
+        // numbers, because a report that states one length while every metric
+        // uses another states a number no measurement uses.
         let concatenated = document.readingOrder
             .map(\.canonical.string)
             .joined(separator: "\n")
@@ -23,6 +31,12 @@ public enum SpikeA {
 
         let roundTrips = SpikeACases.all(document)
         probes.append(try identityRoundTripProbe(roundTrips))
+
+        // ---- The metric matrix: ADR-0009's properties, on three axes ----
+        probes.append(try ProgressProbes.monotonicity(document))
+        probes.append(try ProgressProbes.layoutIndependence())
+        probes.append(try ProgressProbes.boundedSeek())
+        probes.append(try ProgressProbes.provenanceHonesty(document))
 
         let canonicalArtifact = ArtifactRecord(byteCount: try writeTranscript(
             document,
@@ -44,6 +58,10 @@ public enum SpikeA {
             fixtureName: SpikeAFixture.name,
             canonicalTextSHA256: SHA256.hex(concatenated),
             canonicalTextUTF16Length: concatenated.utf16.count,
+            // The sum of the units' own lengths — the denominator every
+            // `canonicalTextIndex` coordinate is a fraction of, and a smaller
+            // number than the transcript above by one separator per gap.
+            readingOrderUTF16Length: document.totalLength,
             documents: documents,
             probes: probes,
             roundTrips: roundTrips,
@@ -180,7 +198,7 @@ public enum SpikeA {
             in: document
         )
         var candidates = 0
-        if case .ambiguous(let positions) = resolution { candidates = positions.count }
+        if case .ambiguous(let positions, _) = resolution { candidates = positions.count }
 
         // The fixture guarantees the text repeats, so "the text occurs twice and
         // the bridge refuses to choose" is a yes. A single occurrence would mean
@@ -219,10 +237,13 @@ public enum SpikeA {
         // +4 is the low surrogate of 𠀋 — see the case of the same name.
         let offset = astral.utf16Range.lowerBound + 4
         let midCharacter = chapter3.canonical.isMidCharacter(offset)
-        let carriedThrough = LocationBridge.locator(
+        // The export carries the names it had to drop; this probe asks only
+        // whether the bridge accepted the offset, so only its existence is read.
+        let exported = LocationBridge.locator(
             from: NativePosition(unitID: chapter3.id, nodeID: .explicitID("astral"), utf16Offset: offset),
             in: document
-        ) != nil
+        )
+        let carriedThrough = exported != nil
 
         return try ProbeOutcome(
             name: "offset-boundaries",

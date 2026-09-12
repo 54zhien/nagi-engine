@@ -8,7 +8,19 @@ public struct SpikeAReport: Codable, Sendable {
     public var spike: String
     public var fixtureName: String
     public var canonicalTextSHA256: String
+    /// The length of the **joined transcript** artifact — every unit's text
+    /// concatenated with a `"\n"` between them. It is larger than the reading
+    /// order by one separator per gap.
+    ///
+    /// This used to be the only length in the report, printed as "N UTF-16
+    /// units", and read as if it were the size of the text. It is not: the
+    /// `canonicalTextIndex` metric divides by `readingOrderUTF16Length`, and the
+    /// two differ. A report that states one length while every metric uses
+    /// another is stating a number that no measurement uses.
     public var canonicalTextUTF16Length: Int
+    /// The sum of the units' canonical lengths — `Document.totalLength`, and the
+    /// denominator every `canonicalTextIndex` coordinate is a fraction of.
+    public var readingOrderUTF16Length: Int
     public var documents: [DocumentSummary]
     public var probes: [ProbeOutcome]
     public var roundTrips: [RoundTrip]
@@ -20,6 +32,7 @@ public struct SpikeAReport: Codable, Sendable {
         fixtureName: String,
         canonicalTextSHA256: String,
         canonicalTextUTF16Length: Int,
+        readingOrderUTF16Length: Int,
         documents: [DocumentSummary],
         probes: [ProbeOutcome],
         roundTrips: [RoundTrip],
@@ -30,6 +43,7 @@ public struct SpikeAReport: Codable, Sendable {
         self.fixtureName = fixtureName
         self.canonicalTextSHA256 = canonicalTextSHA256
         self.canonicalTextUTF16Length = canonicalTextUTF16Length
+        self.readingOrderUTF16Length = readingOrderUTF16Length
         self.documents = documents
         self.probes = probes
         self.roundTrips = roundTrips
@@ -47,6 +61,7 @@ public struct SpikeAReport: Codable, Sendable {
             fixtureName: fixtureName,
             canonicalTextSHA256: canonicalTextSHA256,
             canonicalTextUTF16Length: canonicalTextUTF16Length,
+            readingOrderUTF16Length: readingOrderUTF16Length,
             documents: documents,
             probes: probes,
             roundTrips: roundTrips
@@ -78,6 +93,7 @@ public struct SpikeACanonicalPayload: Codable, Sendable {
     public var fixtureName: String
     public var canonicalTextSHA256: String
     public var canonicalTextUTF16Length: Int
+    public var readingOrderUTF16Length: Int
     public var documents: [DocumentSummary]
     public var probes: [ProbeOutcome]
     public var roundTrips: [RoundTrip]

@@ -97,6 +97,25 @@ public struct RoundTrip: Sendable, Hashable, Codable {
     /// Set when the conversion could not be made structurally at all.
     public var needsReanchor: Bool
     public var reanchorReason: String?
+    /// Every name this row's information was dropped under, from **both**
+    /// directions: what `LocationBridge.native(from:)` could not carry in
+    /// (`Resolution.discarded`), and what `LocationBridge.locator(from:)` had to
+    /// drop to fit the mirror.
+    ///
+    /// Until this round that first array was not merely unread — it was
+    /// **pattern-discarded at its only call site**, `if case .approximate(_,
+    /// let basis, _)`, with the third binding a bare `_`. A value nobody reads
+    /// is a value nobody can be wrong about; this is where it starts being read.
+    public var discarded: [String]
+    /// The channel the position was **derived** from rather than carried —
+    /// `Resolution.approximate`'s basis. Nil when nothing was derived.
+    ///
+    /// **Not a premise for a verdict.** It comes from the same expression
+    /// `carried` is computed from, so `derivedFrom != nil ⟹ some field is not
+    /// .carried` is true by construction and can never be evidence of anything.
+    /// Anything checking that invariant has to ask a question this value cannot
+    /// answer — see `ProgressProbes.provenanceHonesty`.
+    public var derivedFrom: String?
 }
 
 public enum RoundTripHarness {
@@ -112,7 +131,7 @@ public enum RoundTripHarness {
         let resolution = LocationBridge.native(from: locator, in: document)
 
         switch resolution {
-        case .unresolvable(let reason):
+        case .unresolvable(let reason, _):
             return RoundTrip(
                 name: name,
                 outcome: .requiresReanchor(reason: reason),
@@ -120,10 +139,12 @@ public enum RoundTripHarness {
                 needsValidator: true,
                 validatorReason: "nothing was resolved, so nothing can be confirmed",
                 needsReanchor: true,
-                reanchorReason: reason
+                reanchorReason: reason,
+                discarded: resolution.discarded,
+                derivedFrom: nil
             )
 
-        case .ambiguous(let candidates):
+        case .ambiguous(let candidates, _):
             let reason = "the locator's information admits \(candidates.count) positions; choosing between them needs quote matching, which is ReanchorService's job"
             return RoundTrip(
                 name: name,
@@ -132,11 +153,13 @@ public enum RoundTripHarness {
                 needsValidator: true,
                 validatorReason: "no single position was chosen",
                 needsReanchor: true,
-                reanchorReason: reason
+                reanchorReason: reason,
+                discarded: resolution.discarded,
+                derivedFrom: nil
             )
 
         case .structural(let position, _), .approximate(let position, _, _):
-            guard let regenerated = LocationBridge.locator(from: position, in: document) else {
+            guard let exported = LocationBridge.locator(from: position, in: document) else {
                 let reason = "the native position \(position.nodeID.described) names a unit the locator side cannot express"
                 return RoundTrip(
                     name: name,
@@ -145,10 +168,18 @@ public enum RoundTripHarness {
                     needsValidator: true,
                     validatorReason: reason,
                     needsReanchor: false,
-                    reanchorReason: nil
+                    reanchorReason: nil,
+                    discarded: resolution.discarded,
+                    derivedFrom: nil
                 )
             }
-            return compare(original: locator, regenerated: regenerated, basis: resolution, name: name)
+            return compare(
+                original: locator,
+                regenerated: exported.locator,
+                basis: resolution,
+                exportDiscarded: exported.discarded,
+                name: name
+            )
         }
     }
 
@@ -162,7 +193,7 @@ public enum RoundTripHarness {
         label: String
     ) -> RoundTrip {
         let name = "\(label) native->locator->native"
-        guard let locator = LocationBridge.locator(from: position, in: document) else {
+        guard let exported = LocationBridge.locator(from: position, in: document) else {
             return RoundTrip(
                 name: name,
                 outcome: .requiresValidator(reason: "the native position names no unit in this document"),
@@ -170,9 +201,12 @@ public enum RoundTripHarness {
                 needsValidator: true,
                 validatorReason: "the position could not be expressed at all",
                 needsReanchor: false,
-                reanchorReason: nil
+                reanchorReason: nil,
+                discarded: [],
+                derivedFrom: nil
             )
         }
+        let locator = exported.locator
 
         let resolution = LocationBridge.native(from: locator, in: document)
         guard let recovered = resolution.position else {
@@ -184,7 +218,9 @@ public enum RoundTripHarness {
                 needsValidator: true,
                 validatorReason: reason,
                 needsReanchor: true,
-                reanchorReason: reason
+                reanchorReason: reason,
+                discarded: resolution.discarded + exported.discarded,
+                derivedFrom: nil
             )
         }
 
@@ -264,7 +300,9 @@ public enum RoundTripHarness {
             needsValidator: true,
             validatorReason: "the position carries no quotation, so only a validator can confirm the offset still lands on the same content",
             needsReanchor: false,
-            reanchorReason: nil
+            reanchorReason: nil,
+            discarded: resolution.discarded + exported.discarded,
+            derivedFrom: derivedBasis
         )
     }
 
@@ -308,6 +346,7 @@ public enum RoundTripHarness {
         original: ReadiumLocator,
         regenerated: ReadiumLocator,
         basis: Resolution,
+        exportDiscarded: [String],
         name: String
     ) -> RoundTrip {
         var fields: [String: FieldVerdict] = [:]
@@ -330,7 +369,9 @@ public enum RoundTripHarness {
         if !original.text.isEmpty { fields["text"] = .notCarriable }
 
         var derivedNotes: [String] = []
+        var derivedBasis: String?
         if case .approximate(_, let basisName, _) = basis {
+            derivedBasis = basisName
             derivedNotes.append("the position was derived from \(basisName), so its offset is this bridge's arithmetic rather than a stated coordinate")
         }
         var semanticNotes: [String] = []
@@ -355,7 +396,9 @@ public enum RoundTripHarness {
                 ? "the locator carried a quotation and the result does not, so nothing in it can confirm the position still names the same content"
                 : "the locator carried no quotation, so identity rested on structure alone and there is nothing to check it against",
             needsReanchor: false,
-            reanchorReason: nil
+            reanchorReason: nil,
+            discarded: basis.discarded + exportDiscarded,
+            derivedFrom: derivedBasis
         )
     }
 }

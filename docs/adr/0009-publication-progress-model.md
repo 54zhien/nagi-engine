@@ -51,7 +51,19 @@ FB2 的 `<binary>` 内嵌 base64 图片会把字节进度严重扭曲；MOBI 压
 
 > metric 必须能在打开时廉价求值（不做全量解析），否则必须有后台计算 + 降级显示态。
 
-Readium 的 `readiumPositions` 之所以便宜，关键在于它用 **archive entry length** —— ZIP 中央目录里的字节长度，**不需要解压**。（见 `EPUBPositionsService.swift`：默认 `archiveEntryLength(pageLength: 1024)`，即按资源字节长度切分；`originalLength(pageLength: 1024)` 是旧策略，现已 opt-in。）
+**这条判据不是一条，是逐 metric 一条。** 原文把它写成了一句对所有 metric 的承诺，而它其实只有其中一部分能做得到 —— 这句话本身就是一个把不同东西说成同一个东西的例子：
+
+| metric | 打开时的成本 | 靠什么 |
+|---|---|---|
+| `readiumPositions` | 廉价 | ZIP 中央目录里的 archive entry length，**不需要解压**（`EPUBPositionsService.swift`：默认 `archiveEntryLength(pageLength: 1024)`；`originalLength` 是旧策略，现已 opt-in） |
+| `fixedPageOrdinal` | 廉价 | **容器自己声明**页数 —— 不需要读内容 |
+| `sourceBytes` | 廉价 | 资源字节数 |
+| `canonicalTextIndex` | **需要整本解析** | canonical primary text 的建索引本身就是解析产物 |
+| `custom` | 由提供者负责 | 逃生口，不承诺 |
+
+`canonicalTextIndex` 这一行是**依赖关系**问题，不是时序问题：它不在于「解析得慢」，而在于「算它之前必须先有整本的 canonical text」。所以它只能落在后半句 —— 后台计算 + 降级显示态，而这件事要在 Document Store 的物化策略里解决，不是一个可以被 profile 出来的耗时。
+
+**第二条准入判据是布局无关性。** 这与 ADR-0008「publication progress 不经由页码」看似冲突（本 ADR 把 `fixedPageOrdinal` 列给 PDF/CBZ），实为互补：**页码在可重排内容上是排版的输出，在固定版式内容上是出版物的属性**。所以「页序号」这个坐标能不能用，取决于它是谁产生的 —— 准入判据就此变成一条可测量的断言，见文末。
 
 **Consequences**
 
@@ -73,3 +85,22 @@ Readium 的 `readiumPositions` 之所以便宜，关键在于它用 **archive en
 **metric 不可互换，也已实测**：spike 写入 `locations.progression` 的是**文本长度** metric 的值，而该字段对 EPUB 的语义是 `readiumPositions`（archive entry 字节长度，见上）。同一个 `0.5` 在两种 metric 下指**不同的位置** —— 一个有意义的数必须连同它的 metric 才能识别位置，而 UI 看不到 metric。
 
 **尚未做**：把契约推广到 `sourceBytes` / `canonicalTextIndex` / `fixedPageOrdinal` 等全部 metric。
+（**已于下述第二轮落地。**）
+
+---
+
+## metric 矩阵已落地（2026-09-12）
+
+**实现的是三个轴，不是五个，而且这不是欠账。** `readiumPositions` 需要 archive entry length，而本 spike 没有 archive；`custom` 是逃生口，给它写一个实现等于凭空发明一种 metric。三个轴 —— `CanonicalTextIndexAxis` / `SourceBytesAxis` / `FixedPageOrdinalAxis` —— 各自带来自己的算术，**没有任何一个 metric 的实现是 stub**。没有注册表：哪个轴适用于哪份文档，这一轮由调用方决定，五实现注册表会有四个是空的。
+
+**metric 身份随数值一起走。** `Progression { value, metric }`，`metric` **非可选**。这不是样式：闭合本文档「metric 不写在 UI 能看见的地方」这句话，唯一的机制就是让**想要裸 `Double` 的调用点必须显式丢掉标签**，而那个丢弃点正是出问题的地方 —— 它必须被记进 `discarded`，不得默默发生。`ReadiumLocator.Locations.progression` 保持裸 `Double?`（镜像保真），转换发生在 bridge，丢弃被记录。
+
+**容差由 metric 声明，不由 probe 选择**，且一律以 metric 自己的单位表示（字节 / 页 / UTF-16）。progression 空间不能用来比容差：报告的量化是三位小数（ADR-0011），那里 1e-9 的误差会被写成 `0.0` 并**制造出精确性**。
+
+**三处契约随实测改动：**
+
+1. **`PublicationProgressService` 遇到外来 position 抛错而非夹取。** 夹取会交回一个出版物从未声明过的坐标，且看起来完全真实 —— 与「由分数反算出来的偏移被报成 carried」是同一种缺陷。
+2. **`Progression` 的可达范围不是全部 metric 都能覆盖 `0.0...1.0`。** `fixedPageOrdinal` 取页心 `(ordinal + 0.5) / pageCount`（这个约定是为了可证伪而选的：取 `ordinal / pageCount` 时 floor 与 round 同答案，一个把 seek 写成四舍五入的实现会静默通过）。代价是它的可达范围只有 `[0.5 / N, 1 - 0.5 / N]`。**UI 那一层要显示 0 与 1 就必须自己补两端**，而不是假装 metric 给了。
+3. **`locations.progression` 是 per-resource，轴的 `progression` 是出版级。** 两者是不同的数，指不同的位置。bridge 写的是前者（`native(from:)` 按 `unit.length` 反算它），而它丢掉的 metric 是 `.canonicalTextIndex` —— 与字段对 EPUB 的 `readiumPositions` 语义**本来就不一致**。这正是本文档早先那条实测（「同一个 `0.5` 在两种 metric 下指不同的位置」）在代码里的样子，现在它被记录了，而不是默默发生。**换成出版级会让每个 offset 都算错，而分划计数仍然全部对得上。**
+
+**准入判据变成了测量，而不是复述。** `progress-layout-independence`：只改容器声明的分页（2 页 → 4 页），同一份字节上问三个 metric —— `sourceBytes` 必须**不动**（锐利臂），`fixedPageOrdinal` 必须**动**（证伪者是一个把页序号实现成字节占比的偷懒写法），`canonicalTextIndex` 必须**不动**（对照臂）。同时测准入侧：容器**没有**声明分页的资源上，页序号必须一律为 `nil` —— metric 拒绝作答，而不是按偶数切一份出来。**一个不可能失败的 probe 没有价值**，所以扫描若一次都没让页序号变化，probe 报 `inconclusive` 而不是 `yes`。

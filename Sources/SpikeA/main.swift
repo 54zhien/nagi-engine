@@ -84,7 +84,13 @@ do {
     print(line("="))
     print("SPIKE A — Locator <-> Native Position identity")
     print(line("="))
-    print("fixture      \(report.fixtureName)  (\(report.canonicalTextUTF16Length) UTF-16 units, sha256 \(report.canonicalTextSHA256.prefix(12))…)")
+    print("fixture      \(report.fixtureName)  (sha256 \(report.canonicalTextSHA256.prefix(12))…)")
+    // Two lengths, deliberately both stated. The first is the transcript
+    // artifact, which joins the units with a separator; the second is what the
+    // canonicalTextIndex metric divides by. Printing only the first used to
+    // state a length that no measurement used.
+    print("transcript   \(report.canonicalTextUTF16Length) UTF-16 units (units joined by a separator)")
+    print("readingOrder \(report.readingOrderUTF16Length) UTF-16 units (the canonicalTextIndex denominator)")
     for document in report.documents {
         print(
             pad("  \(document.href)", 34)
@@ -120,6 +126,16 @@ do {
     print(line())
     for trip in report.roundTrips {
         print(pad(trip.name, 52) + outcomeLabel(trip.outcome))
+        // Where the value came from, when it was not carried, and every name the
+        // row's information was dropped under — from both directions. Until this
+        // round the inbound half of this list was pattern-discarded at its only
+        // call site and no one read it.
+        if let derivedFrom = trip.derivedFrom {
+            print("      · derived from \(derivedFrom), not carried")
+        }
+        if !trip.discarded.isEmpty {
+            print("      · dropped: \(trip.discarded.sorted().joined(separator: ", "))")
+        }
         if case .recomputedEquivalent(let notes) = trip.outcome {
             for note in notes { print("      · \(note)") }
         }

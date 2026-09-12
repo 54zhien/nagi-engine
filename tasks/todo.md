@@ -18,14 +18,22 @@
 - [x] 测试同步（`carried` 改名 + 新增两处断言）
 - [ ] **未做**：`compare` 的判定输入改为 `Resolution.discarded`（今天仍无人读取）；ADR 更新
 
-### 阶段二：metric 矩阵
+### 阶段二：metric 矩阵 —— 计划全文见 `C:\Users\Azusa\.claude\plans\immutable-jingling-dragonfly.md`
 
-- [ ] `Progression { value, metric }` —— **metric 非可选**，闭合 ADR-0009:73
-- [ ] `ProgressMetricAxis` 协议；**容差由 metric 声明**、只用 metric 单位（progression 空间会被 `Quantize` 洗成精确）
-- [ ] `CanonicalTextIndexAxis` 吸收 `Document.progression(of:)` / `totalProgression(of:)`
-- [ ] fixture：`ByteResource`（续字节 / CRLF / 非法字节，**`legalBoundaries` 手写**）+ 一个 `pageCount` 资源
-- [ ] 四个 probe，每条点名**能把它翻成 `no` 的变异**
-- [ ] `layout-independence` 必须要求 `fixedPageOrdinal` **变**且 `canonicalTextIndex` **不变**
+**先调用**：`/codebase-design`、`/domain-modeling`（已调）；完成前 `/code-review`。
+
+- [ ] `PublicationProgressMetric` / `Progression { value, metric }` —— **metric 非可选**，闭合 ADR-0009:73
+- [ ] `ProgressMetricAxis`（构造式捕获，无 `in document:`）+ 泛型 `PublicationProgressService`（**抛错不夹取**）
+- [ ] `CanonicalTextIndexAxis` 吸收并删除 `Document.progression(of:)` / `totalProgression(of:)`；清两处过期注释
+- [ ] **`locator(from:)` 的 per-unit 算术必须原样保留**（`locations.progression` 是 per-resource 语义，轴的 `progression` 是出版级；换过去会让 `native-path-anchored` 从 22 反算成 9 而**桶和仍是 19**）
+- [ ] `locator(from:)` → `LocatorExport?`，在丢标签处记 `"progression.metric"`；`native(from:)` 一行不动
+- [ ] `ByteResource`（`Sendable`；字节↔文本映射走**前缀解码**，不写扫描器）+ 三个 `pageRanges` 声明（nil / 2 页 / 4 页，**只用 2 的幂**）
+- [ ] fixture：空 unit 插在 chap2 与 chap3 之间
+- [ ] `RoundTrip` 加 `discarded` / `derivedFrom`（让 `Resolution.discarded` 第一次进入 artifact）
+- [ ] 报告加 `readingOrderUTF16Length`（**4 个写入点**，漏一个就静默不进指纹）
+- [ ] 四个 probe，每条点名**能把它翻成 `no` 的变异**；**每个 service 调用必须 `do/catch`**，否则轴行为不端会把 `no` 变成红 Gate 2
+- [ ] `layout-independence` 的三臂必须建在**同一份 `ByteResource`** 上（否则是 `nil == nil`）
+- [ ] ADR-0009 / 0008、测试、`main.swift`
 
 ## 已完成：Spike A 第二轮 —— 让往返契约回到它真正成立的样子
 

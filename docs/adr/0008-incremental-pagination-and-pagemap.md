@@ -18,6 +18,13 @@ struct PageMapSnapshot: Sendable {
 
 PageMap 未就绪时总页数未知。产品上显示「第 47 页 / 共 ? 页」，或暂不显示总页数。**页码是派生输出；publication progress 不经由页码**（见 ADR-0009）。
 
+> **这条禁令与 ADR-0009 把 `fixedPageOrdinal` 列给 PDF/CBZ 看似矛盾，实为互补**（2026-09-12 补记）。
+> 页序号在**可重排**内容上是排版的输出，在**固定版式**内容上是出版物的属性。判据不是「能不能用页序号」，
+> 而是**布局无关性**：只有内容自身携带页序号的格式才准把它当坐标。
+>
+> Spike A 阶段二已把它从一句话变成一次测量（`progress-layout-independence`）：容器**声明**了分页的资源上
+> 页序号必须存在且随声明变化，容器**没有**声明的资源上必须一律为 `nil` —— 拒绝作答，而不是按偶数切一份出来。
+
 **分页边界**
 
 **v1 的 `DocumentUnit` 是 hard pagination boundary —— 页不跨 unit。** 理由不是「Readium 如此」，而是这样第一版可以隔离一批难题：不同 root style、不同 writing-mode、不同 CSS inheritance root、章节标题、`break-before`、resource 生命周期、页眉归属、unit 加载。
