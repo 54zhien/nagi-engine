@@ -24,7 +24,37 @@ Phase 3    ReanchorService
 - [x] `mediaType` 删除（不可能变化的字段）；`otherLocations` 排除 `cssSelector`（重复计数）
 - [x] 有序数组 + `sortedFields`，**字典不进 Codable 类型**
 - [x] `ProbeEvidence`（`monotonicity` / `provenanceHonesty` 已接；另两个的判定不是单一 observed/violations 对，硬套会改读数，留到下一轮）
-- [ ] 推 CI，核对 **20 行桶一个都不许动**（`exact` **5** / `recomputed` 5 / `semantic` 1 / `loses` 3 / `reanchor` 6 / `validator` 0 —— 上一版记的 4 是 19 行时代的数，`4+5+1+3+6+0 = 19 ≠ 20`）
+- [x] 推 CI（run 34681113858，两 gate 全绿，commit `d207df5`）—— **20 行桶一个都不许动**（`exact` **5** / `recomputed` 5 / `semantic` 1 / `loses` 3 / `reanchor` 6 / `validator` 0 —— 上一版记的 4 是 19 行时代的数，`4+5+1+3+6+0 = 19 ≠ 20`）
+
+#### 第一次的读数（run 34681113858，两 gate 全绿，commit `d207df5`）
+
+```
+Gate 1   136 tests / 0 failures   （+1：ProbeEvidence 那条）
+Gate 2   fingerprint 3c897327… 三进程一致
+
+identity-round-trip  20 cases: 5 exact, 5 recomputed-equivalent, 1 semantic-equivalent,
+                     3 losing fields, 0 blocked, 6 needing a reanchor
+                     —— **与重写前逐字相同**
+progress-provenance  discardedFields=19  distinctRefusals=5  carriedOffsetRows=1  unbackedCarriedRows=0
+                     writtenProgression=0.289（per-resource）vs publicationProgression=0.118（出版级）
+四个 metric probe     全 MEASURED / yes，数一个没动
+```
+
+**桶位不变是这一轮的目的，不是巧合。** 按 §二 的规则（字段「当且仅当输入声明了它」+ 出站只陈述偏移归宿），任何一行搬家都说明「谁陈述什么」写错了。审查代理推之前把 20 行逐条手推了一遍，读数与它一致。
+
+设计上**预期会变**的两处，均非回归：`progress-provenance` 的 (c) 改读 `trip.resolutions`（旧的扁平列表 27 个名字 → 19 个字段、5 种拒绝）；字段表不再有 `mediaType`，`fragments` 有了真正的 provenance。
+
+旗舰行现在在 artifact 里说清了它一直该说的话：
+
+```
+utf16Offset   22   22   recomputed from progression, bounded by 0.5 canonicalTextIndex
+```
+
+数字相等，而 provenance 写着它**没有被带过去** —— 这正是前两轮假阳性的病根。
+
+#### 踩到的坑
+
+**Python 机械替换少留了一个 `}`**，`ProgressMetricTests.swift` open 31 / close 30，测试 target 编译不过。编译面审查代理**看不见它**（它读 diff，EOF 缺右括号在 diff 里不可见）。已写进 `lessons.md`：用脚本动过 Swift 源文件，推之前逐文件数括号。
 
 ### 第二次：两个零覆盖词汇定案
 
