@@ -268,6 +268,13 @@ final class IdentityTests: XCTestCase {
     /// bridge does not emit — `domRange` with `charOffset`, say — and Readium's
     /// own JavaScript producer does not emit one either (`dom.js:55-67`), so the
     /// gap is real on both sides rather than a shortcut taken here.
+    ///
+    /// **What does not close it**: the very same locator also carries a
+    /// `progression`, and inverting that would hand the offset straight back.
+    /// ADR-0009 forbids it — "精确的阅读位置恢复不得经由 `Double` progression
+    /// 往返" — and it is why the sibling row with no fragment resolves only
+    /// `.approximate`. The gap is a property of the coordinate system, not of
+    /// this bridge's diligence.
     func testSubElementPrecisionIsLostThroughAFragmentAnchoredLocator() throws {
         let document = try document()
         let unit = try XCTUnwrap(document.unit(withID: "OEBPS/chap3.xhtml"))
@@ -306,5 +313,53 @@ final class IdentityTests: XCTestCase {
         )
         XCTAssertTrue(trip.fields["nodeID"] == .reproduced, "the paragraph is still named correctly")
         XCTAssertTrue(trip.fields["utf16Offset"] == .lost, "but the place inside it is not")
+    }
+
+    /// The counterpart of the two above, and the reason neither of them is the
+    /// whole story: when the node has no id the locator gets **no fragment at
+    /// all**, so the only channel left for the position is a progression —
+    /// which ADR-0009 forbids using to recover a reading position exactly.
+    ///
+    /// The offset does come back, and it comes back *equal*. It is still not
+    /// carried: the bridge inverted a fraction to rebuild it, and that inversion
+    /// is exact for every offset this fixture can reach, so the equality was
+    /// never capable of failing. Calling it `.exact` would claim a precision the
+    /// Progression path does not have — ADR-0009 gives that path a bounded
+    /// tolerance. So both fields are `.recomputed`, not `.reproduced`: equal is
+    /// not the same as carried.
+    ///
+    /// This row had no test at all before, which is how it stayed wrong.
+    func testAPathAnchoredPositionIsRebuiltRatherThanCarried() throws {
+        let document = try document()
+        let unit = try XCTUnwrap(document.unit(withID: "OEBPS/chap1.xhtml"))
+        let anonymous = try XCTUnwrap(
+            unit.canonical.elements.first { $0.name == "p" && $0.explicitID == nil },
+            "the fixture must still carry a paragraph with no id"
+        )
+        let offset = anonymous.utf16Range.lowerBound + 1
+
+        let trip = RoundTripHarness.nativeToLocatorToNative(
+            NativePosition(unitID: unit.id, nodeID: .path(anonymous.path), utf16Offset: offset),
+            in: document,
+            label: "native-path-anchored"
+        )
+
+        // The numbers agree — which is precisely why this case is the dangerous
+        // one, and why the verdict has to be about provenance instead.
+        XCTAssertTrue(
+            trip.fields["utf16Offset"] == .recomputed,
+            "equal, but rebuilt from a fraction rather than carried"
+        )
+        XCTAssertTrue(
+            trip.fields["nodeID"] == .recomputed,
+            "the node came back from that same recovered number, so it is implied by the offset rather than confirmed independently"
+        )
+        guard case .semanticEquivalent(let notes) = trip.outcome else {
+            return XCTFail("expected a semantic-equivalent verdict, got \(trip.outcome)")
+        }
+        XCTAssertTrue(
+            notes.contains { $0.contains("progression") },
+            "the note has to name the channel the value was rebuilt from, or a reader will think the number changed"
+        )
     }
 }

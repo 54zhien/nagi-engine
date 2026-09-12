@@ -171,6 +171,14 @@ enum SpikeACases {
         }
 
         // A paragraph with no id at all, so the only identity it has is its path.
+        //
+        // This row is now the report's only evidence that **a path-rung identity
+        // cannot be written into a locator at all**: with no id there is no
+        // fragment to emit, so the position travels as a progression — a
+        // channel ADR-0009 rules out for exact recovery. The offset comes back
+        // equal, and that equality is arithmetic rather than information, so the
+        // row reports `semanticEquivalent` with both fields `.recomputed`. It
+        // looking like a success is the thing to distrust.
         if let anonymous = chapter1.canonical.elements.first(where: { $0.name == "p" && $0.explicitID == nil }) {
             cases.append(NativeCase(
                 label: "native-path-anchored",

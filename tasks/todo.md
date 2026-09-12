@@ -1,6 +1,31 @@
 # TODO
 
-## 当前任务：Spike A —— Locator ↔ NativePosition 身份往返
+## 当前任务：Spike A 第二轮 —— 让往返契约回到它真正成立的样子
+
+计划全文见 `C:\Users\Azusa\.claude\plans\curious-scribbling-forest.md`。
+第一轮读数已出（`945ad92`），但**复核代码后发现第一轮的头条结论引错了地方**。
+
+**根因**：`locator(from:)` 已经同时发 `fragments` 和 `progression`；丢 offset 发生在**解析侧** —— `native(from:)` 一命中 fragment 就返回元素起点，不再看 progression。而「改用 progression 补回 offset」被 **ADR-0009** 明令禁止：
+
+> 精确的阅读位置恢复**不得**经由 `Double` progression 往返。
+
+所以 **bridge 是对的，错的是测量仪**：`RoundTrip.nativeToLocatorToNative` 把一个由 progression **算回来**的 offset 判成 `.reproduced`，进而报 `.exact`。
+`compare`（反方向）对同一个道理**已经写对了规则**（`RoundTrip.swift:181-186`），只是没施加到「由 progression 推出的那个 offset」上。
+
+- [ ] `RoundTrip.nativeToLocatorToNative`：`.approximate` 解析下 `utf16Offset` 判 `.recomputed`，**数字相等也不判 `.reproduced`**
+- [ ] 同一条规则施加到 `nodeID` —— `.approximate` 下 `nodeIDMatches` 由 `offsetMatches` **蕴含**，判 `.reproduced` 是把恒真式报成「幸存的事实」
+- [ ] outcome → `.semanticEquivalent` 并附 provenance 说明（**不是 `.loses`**：数字相等，bounded-seek 的成功不是失败）
+- [ ] 重写硬编码的说明文字（`RoundTrip.swift:149-151`），改为组装 notes
+- [ ] 根因注释：`fields` 的「survived」→「was carried」；`FieldVerdict.recomputed` 的「different value」措辞
+- [ ] **新增测试**：`.path` 形态的 native-first 断言（目前**零覆盖**），offset 从 fixture 推导不写常数
+- [ ] `SpikeACases.swift:173` 注释补：这一行现在是「path 级身份无法写入 locator」的唯一证据
+- [ ] `docs/adr/0009` 记录 `:60` 的 Pending Spike A 前半落地；`docs/adr/0004` 记表达能力边界与「假的兜底」
+- [ ] 推 CI，**读 artifact 的实际数字**，把真实结果回报（不预先声称）
+
+**判据用 `.approximate` 本身，不用 basis 字符串** —— `"progression (clamped)"` 同样可达。
+**不动 `LocationBridge` 任何行为**；不给 bridge 加 `domRange`/`partialCfi`（那会测量一个现实生产者不产出的形状）。
+
+## 已完成：Spike A 第一轮 —— Locator ↔ NativePosition 身份往返
 
 Spike B 已封版于 `763e2c9`（证明了 Nagi 能掌握**排版**）。Spike A 要证明 Nagi 能掌握**身份**。
 计划全文见 `C:\Users\Azusa\.claude\plans\bubbly-enchanting-alpaca.md`。
@@ -20,7 +45,7 @@ Spike B 已封版于 `763e2c9`（证明了 Nagi 能掌握**排版**）。Spike A
 - [x] `SpikeAReport` + `Sources/SpikeA/main.swift`（沿用 B 的报告纪律与跨进程指纹）
 - [x] `Tests/SpikeAKitTests/` —— 镜像保真度 / canonical text / 身份与往返
 - [x] `.github/workflows/ci.yml` 的 Gate 2 增加 `spike-a` 三进程比对
-- [ ] **在 macOS 上跑 Gate 1** —— 本机无工具链，第一次 CI 前不声称任何结论
+- [x] **在 macOS 上跑 Gate 1** —— 本机无工具链，已由 CI（`macos-15`）在 run 34676261279 实跑，与 Gate 2 同绿
 
 ### 写作过程中靠阅读（而非编译器）抓到的真 bug
 
@@ -35,4 +60,39 @@ Spike B 已封版于 `763e2c9`（证明了 Nagi 能掌握**排版**）。Spike A
 
 ## Review
 
-（完成后记录）
+### Spike A 第一次真实读数（run 34676261279，两个 gate 全绿，commit `945ad92`）
+
+```
+canonical-text-shape      measured  yes  annotation excluded ✓ 折叠符合模型 ✓ 非 BMP 在 UTF-16 上更宽（31 字符 / 35 单元）
+href-routing              measured  yes  同一个 id 在两个内容相同的 unit 里解析到不同 unit —— href 在起作用
+duplicate-text-ambiguity  measured  yes  引文出现 2 次，bridge 返回 2 个候选
+offset-boundaries         measured  yes  offset 4 落在非 BMP 字符内部，bridge **原样带过**（不吸附）
+identity-round-trip       measured  yes  18 例：4 exact / 5 semantic / 3 loses / 6 requiresReanchor
+
+18 例中 **18 例都无法在没有 validator 的情况下确认身份**
+determinism: measured / yes（跨进程指纹一致）
+```
+
+#### 最锋利的一条：`fragments` 与 `progression` 不可互换
+
+`native→locator→native` 的三例**全部**丢掉了 `utf16Offset`，而 `native-path-anchored` **保住了**。相关性是完美的：
+
+| nodeID | 回程走哪条路 | offset |
+|---|---|---|
+| `.explicitID`（有 id） | `fragments` → 解析到**元素起点** | **丢失** |
+| `.path`（无 id） | `progression` → 按长度换算 | **保留** |
+
+即：**`fragments` 命名一个元素，`progression` 命名一个位置。** 当前 `locator(from:)` 优先发 `fragments`，恰好是精度上的错误取舍 —— 而两者单独都不完整。这是 Spike A 直接给出的架构结论。
+
+#### 没预测到的一条
+
+`unknown-href-with-fallback`（未知 href + `totalProgression`）落到 **`requiresReanchor`**，不是我预判的 `.loses(["href"])`。原因：Readium 唯一的兜底（`totalProgression`）**只能定位到资源，定位不到资源里的位置** —— bridge 找到了 unit，却在 unit 内无物可依（该 locator 没有 fragment/cssSelector/progression/position），于是最终仍是不可解。**兜底是假的兜底。**
+
+#### 与预测的对照
+
+命中的：结构锚点 exact ✓、引文丢 text/title ✓、positions-service 形状丢全局编号 ✓、纯全局 position 不可解 ✓、重复引文进 Reanchor ✓、复杂选择器被拒绝而非猜测 ✓。
+未命中的：上面那条 fallback；以及 `native-id-anchored` 的 offset 丢失（我原以为元素起点能往返，实际 `+3` 就丢了 —— 测试里用的是起点，恰好是唯一能保住的 offset）。
+
+#### 仍未验证
+
+`ReanchorService` 的模糊匹配**没有实现**，本轮只判定「需要它」。样本仍是一个 fixture、一套合成 XHTML。ADR-0003 的文档序键问题本轮未触及。

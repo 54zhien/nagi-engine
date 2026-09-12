@@ -2,10 +2,17 @@ import Foundation
 
 /// What a conversion did to a locator's information.
 public enum FieldVerdict: String, Sendable, Hashable, Codable {
-    /// Came back identical.
+    /// Came back identical, and it travelled: the locator carried this value.
     case reproduced
-    /// Came back as a different value denoting the same place — a recomputed
-    /// progression, a differently spelled href.
+    /// Came back denoting the same place, but **re-derived rather than carried**
+    /// — a recomputed progression, an offset recovered from one, a differently
+    /// spelled href.
+    ///
+    /// The value may be *equal* to the original. `compare` has always read this
+    /// verdict that way ("an equal number is a coincidence of the arithmetic and
+    /// not a copy"); the wording here said "a different value" and understated
+    /// it, which is how a rebuilt-at-the-far-end offset came to be reported as
+    /// though it had survived.
     case recomputed
     /// A Native Position has nowhere to put it. Not a bug: a coordinate cannot
     /// carry a quotation.
@@ -29,8 +36,15 @@ public enum RoundTripOutcome: Sendable, Hashable, Codable {
 public struct RoundTrip: Sendable, Hashable, Codable {
     public var name: String
     public var outcome: RoundTripOutcome
-    /// Per-field verdicts, so a reader can see *which* information survived
-    /// rather than only whether the whole thing did.
+    /// Per-field verdicts, so a reader can see *which* information was
+    /// **carried** rather than only whether the whole thing arrived.
+    ///
+    /// "Carried" is the operative word and it is not a synonym for "equal". A
+    /// value that arrives identical because the bridge recomputed it at the far
+    /// end did not survive the trip — it was rebuilt there, from something else.
+    /// Both directions of this harness read this dictionary; they used to read
+    /// it differently, which is the whole reason one of them could call a
+    /// re-derived offset `.reproduced`.
     public var fields: [String: FieldVerdict]
     /// Every conversion through a Native Position needs a validator, and the
     /// reason says which of two situations it is in: the quote was dropped on
@@ -131,18 +145,64 @@ public enum RoundTripHarness {
             )
         }
 
+        // Did the offset come back *carried*, or was it *rebuilt* at this end?
+        //
+        // `Resolution.approximate` is exactly the rebuilt case, and says so
+        // itself: "the offset is this bridge's arithmetic rather than anything
+        // the locator stated" (`LocationBridge.swift:15-18`). Keyed on the case
+        // and not on the basis string, so that "progression (clamped)" — which
+        // is reachable — cannot slip past a text comparison.
+        //
+        // (`basis: "text.highlight"` is unreachable in this direction:
+        // `locator(from:)` never emits a quotation and `native(from:)` requires
+        // a non-empty one. Its offset would be an element's range rather than a
+        // number — a different reason for the same verdict.)
+        var derivedBasis: String?
+        if case .approximate(_, let basis, _) = resolution { derivedBasis = basis }
+        let carried = derivedBasis == nil
+
         var fields: [String: FieldVerdict] = [:]
         fields["href"] = locator.href == document.unit(withID: position.unitID)?.href ? .reproduced : .recomputed
         let unitIDMatches = recovered.unitID == position.unitID
         let nodeIDMatches = recovered.nodeID == position.nodeID
         let offsetMatches = recovered.utf16Offset == position.utf16Offset
         fields["unitID"] = unitIDMatches ? .reproduced : .lost
-        fields["nodeID"] = nodeIDMatches ? .reproduced : .recomputed
-        fields["utf16Offset"] = offsetMatches ? .reproduced : .lost
+        // Under a derived resolution the node is recovered by
+        // `innermostElement(containing:)` and the offset by inverting a
+        // fraction — both functions of the same number. So `nodeIDMatches` is
+        // *implied by* `offsetMatches` rather than independent evidence of it,
+        // and `.reproduced` on either would report a tautology as a surviving
+        // fact. Equal is not the same as carried.
+        fields["nodeID"] = (nodeIDMatches && carried) ? .reproduced : .recomputed
+
+        // Three outcomes for the offset, not two: it can arrive *equal because
+        // it was recomputed*, which is neither `.reproduced` (nothing carried
+        // it) nor `.lost` (nothing was dropped — the number is exactly right).
+        // Spelled out rather than nested, so each verdict gets its own line.
+        let offsetVerdict: FieldVerdict
+        if !offsetMatches {
+            offsetVerdict = .lost
+        } else if carried {
+            offsetVerdict = .reproduced
+        } else {
+            offsetVerdict = .recomputed
+        }
+        fields["utf16Offset"] = offsetVerdict
 
         let outcome: RoundTripOutcome
         if !unitIDMatches || !offsetMatches {
             outcome = .loses(fields: fields.filter { $0.value == .lost }.keys.sorted())
+        } else if let basis = derivedBasis {
+            // Equal, but not carried. `.semanticEquivalent` and not `.loses`,
+            // deliberately: the numbers do agree, and ADR-0009 gives the
+            // progression round trip a bounded tolerance — reporting a
+            // successful bounded seek as a lost field would be a second kind of
+            // misreport, in the opposite direction.
+            outcome = .semanticEquivalent(notes: [
+                "the offset came back numerically equal, but it was recomputed and not carried: the locator named no position inside the unit, so the bridge inverted \(basis) to obtain one",
+                "an equal number is not evidence here — \(basis) is a fraction whose metric the locator does not state, and ADR-0009 lays the progression round trip down as a bounded tolerance rather than an exactness guarantee. The inversion is exact for every offset this fixture can reach, so this equality could never have failed",
+                "the resolution itself lists \(basis) as discarded, so what survived was not anything the locator stated"
+            ])
         } else if nodeIDMatches {
             outcome = .exact
         } else {
