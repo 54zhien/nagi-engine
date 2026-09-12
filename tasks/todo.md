@@ -5,18 +5,18 @@
 计划全文见 `C:\Users\Azusa\.claude\plans\curious-scribbling-forest.md`。
 **分两次推送、各自读数** —— 合起来推就分不清是哪一半改变了读数。
 
-### 阶段一：harness 修整
+### 阶段一：harness 修整 —— **已推 `5984b84`，CI run 34677720492 两 gate 全绿**
 
-- [ ] **先加一个 `#p1` 形态的 locator 用例** —— 否则 href 修复**不可观测**（fixture 里没有任何 href 是规范化变体，改完一行都不变，CI 无从确认）
-- [ ] href：`nativeToLocatorToNative` 那个方向**没有输入 href 可比**（href 是从 unit 导出的）→ 只能 `.recomputed`；**恒真式**（拿 unit 的 href 和它自己比）必须消失；unit 查不到不得伪装成 verdict
-- [ ] `FieldVerdict`：`reproduced` → **`carried`**；新增 **`approximated`**；六项含义写进类型文档
-- [ ] **`exact` ⟺ 每个字段都是 `.carried`**（结构约束，非命名约定）
-- [ ] outcome 拆两个：**`recomputedEquivalent`**（有字段被重算/近似）/ **`semanticEquivalent`**（仅因不可携带而不同）
-- [ ] `compare` 逐行重写：判定输入改为 `Resolution.discarded`（**今天无人读取**）
-- [ ] `main.swift:54` `outcomeLabel` —— 全仓库唯一穷尽 switch，加 case 的编译期绊线
-- [ ] `identityRoundTripProbe` —— 加桶 + **「桶和 == cases」断言**（否则新 case 静默消失）
-- [ ] `IdentityTests.swift` 14 处字段断言 + 5 处 outcome 匹配同步
-- [ ] ADR-0004 / 0009 更新；`SpikeARunner.swift:14-17` 的 `"\n"` join 与 `Document.totalLength` 差 2，两者都要标注
+- [x] 先加 `#p1` 形态的 locator 用例（`id-anchored-with-fragment-in-href`）+ 一条穿过 bridge 的测试
+- [x] href：**那个方向改为一律不报 href 字段**（见下方 Review 的偏离说明）
+- [x] `FieldVerdict`：`reproduced` → `carried`；新增 `approximated`；六项按 provenance 定义
+- [x] **`exact` ⟺ 每个字段 `.carried`**
+- [x] outcome 拆两个：`recomputedEquivalent` / `semanticEquivalent`
+- [x] **两个方向共用一个 `classify`**（`RoundTrip.swift:288` 定义，`:258` / `:346` 调用）
+- [x] `main.swift` `outcomeLabel` 加 case（编译期绊线）
+- [x] `identityRoundTripProbe` 加桶 + **分划断言**（`RoundTripCensusError`）
+- [x] 测试同步（`carried` 改名 + 新增两处断言）
+- [ ] **未做**：`compare` 的判定输入改为 `Resolution.discarded`（今天仍无人读取）；ADR 更新
 
 ### 阶段二：metric 矩阵
 
@@ -91,6 +91,39 @@ Spike B 已封版于 `763e2c9`（证明了 Nagi 能掌握**排版**）。Spike A
 计划里「不动 Spike B 的任何文件」。实际改了 `Sources/SpikeKit/Report.swift` **一处**：给 `DeterminismRecord` 加了 `public init`。原因是 `SpikeAKit` 是另一个模块，合成 memberwise init 是 internal，不暴露就构造不了。**纯增量**，Spike B 行为不变，其测试仍在跑。
 
 ## Review
+
+### 第三轮阶段一：把测量规则冻结成结构（run 34677720492，两 gate 全绿，commit `5984b84`）
+
+```
+Gate 1   全部测试通过（含新增的 href 用例与改写后的 .path 断言）
+Gate 2   Spike A 跨进程指纹一致 → MEASURED / yes
+
+identity-round-trip  19 cases: 4 exact, 5 recomputed-equivalent, 1 semantic-equivalent,
+                     3 losing fields, 0 blocked, 6 needing a reanchor.
+                     19 of them cannot confirm identity without a validator.
+N  cases=19  exact=4  recomputedEquivalent=5  semanticEquivalent=1  losesFields=3  requiresReanchor=6
+```
+
+**分离的价值由实测证明，而不是由论证。** 分离前 6 行全叫 `semanticEquivalent`；现在是 **5 个 `recomputed` + 1 个 `semantic`**。
+那唯一的 `semantic` 是 `id-anchored-with-quotation` —— 它丢的是引文（`notCarriable`），**没有任何东西被重算**。
+这恰好是我当初反对「整体改名为 `recomputedEquivalent`」的理由，现在第一次有了测量支撑：那一行会被误名。
+
+`id-anchored-with-fragment-in-href` → `exact`，cases 18→19、exact 3→4。**新增用例确实是可观测的** —— 语义 href 比较第一次被真正走过。
+四个原本 `semantic` 的 locator-first 行（`positions-service-shaped` / `js-shaped-selector` / `progression-out-of-range` / `quotation-unique`）现为 `recomputed`：它们**都有**一个由 offset 导出的 `progression` 字段。桶和 4+5+1+3+0+6 = 19 ✓（分划断言首次生效）。
+
+#### 偏离计划的一处
+
+计划写的是「href 在那个方向判 `.recomputed`」，落地时发现那会让 **`exact` 在 native-first 方向永远不可达**（该方向 locator 的每个字段都是合成的），于是 `exact` 在那里失去意义。
+改为**根本不报这个字段**。理由是同一条原则的推论：**一个不可能变化的字段不携带信息，报告它本身就是缺陷，而不是给它选哪个裁定。**
+该方向「是否落回正确 unit」由 `unitID` 回答。测试里加了 `XCTAssertNil(trip.fields["href"])` 钉住。
+
+#### 尚未做
+
+- `compare` 的判定输入改为 `Resolution.discarded`（**今天全仓库无人读取它**）—— 这是计划里的「逐行重写」，本轮未动。
+- ADR-0004 / 0009 的对应更新。
+- `SpikeARunner.swift:14-17` 的 `"\n"` join 与 `Document.totalLength` 差 2 —— 未标注。
+- **阶段二（metric 矩阵）整体未开始。**
+
 
 ### 第二轮：契约改述为「Anchor 精确 / Progression 有界」（run 34677202575，两 gate 全绿，commit `83c693a`）
 
