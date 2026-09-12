@@ -287,7 +287,7 @@ public enum RoundTripHarness {
     ) throws -> RoundTrip {
         let table = resolution?.provenance ?? []
         let outcome = try OutcomeReducer.reduce(
-            table.map(\.provenanceOnly),
+            table,
             shape: shape,
             refusalReason: resolution?.refusalReason ?? validatorReason,
             row: name
@@ -332,7 +332,7 @@ public enum RoundTripHarness {
         resolved: (LocatorField) -> String?
     ) throws -> RoundTrip {
         let outcome = try OutcomeReducer.reduce(
-            table.map(\.provenanceOnly),
+            table,
             shape: shape,
             refusalReason: refusalReason,
             row: name

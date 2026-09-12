@@ -68,8 +68,9 @@ utf16Offset   22   22   recomputed from progression, bounded by 0.5 canonicalTex
 - [x] **6** `refused()` 的两列值渲染不出来（`js-shaped-complex-selector  href  —  —  carried`）
 - [x] ADR-0004 / 0009 同步（用户拍板：两份都改）
 - [x] 推之前必跑 ① 全仓库 `{` / `}` 逐文件平衡 → **33 文件 / 0 问题**（脚本见 `%TEMP%\bracecheck.py`）
-- [ ] 推之前必跑 ② 独立代理核编译面与桶位 → **进行中**
-- [ ] 推 CI，读实际读数
+- [x] 推之前必跑 ② 独立代理核编译面与桶位 → **跑过了，报 11 处发现**（9 处已修），但**它把一处编译错误判成「complete」**：`table.map(\.provenanceOnly)`，而 `provenanceOnly` 定义在 `FieldResolution` 上、`table` 是 `[FieldProvenance]`。见 `lessons.md` 新增那条。
+- [x] 推 CI run 34702448668 → **Gate 1 红**（上面那处编译错误，`RoundTrip.swift:290` / `:335`），Gate 2 因 `needs: gate-1` 被 skip。已修，重推。
+- [ ] 修完重推，读实际读数
 
 #### 执行前拍板 / 修正（计划文件内部有四处自相矛盾，以此为准）
 

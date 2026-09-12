@@ -34,12 +34,13 @@ public enum OutcomeReducer {
 
     /// - Parameters:
     ///   - transport: what happened to each field the input stated — and, by
-    ///     construction, **nothing else**. `RoundTrip.transportResolutions`
-    ///     projected through `provenanceOnly`, which drops the two values a
-    ///     reader sees; the bridge's own `observations` are a different type in a
-    ///     different property, so they cannot arrive here even by mistake. A
-    ///     metric label that had no business in this list is what let a row read
-    ///     `exact` over its own `refused` row.
+    ///     construction, **nothing else**. Two types do the work rather than a
+    ///     rule anyone has to remember: a `FieldProvenance` has nowhere to put
+    ///     the two values a reader sees, so no branch below can compare before
+    ///     against after; and the bridge's own facts are `Observation`s, a
+    ///     different type in a different property, which cannot be passed here at
+    ///     all. A metric label that had no business in this list is what let a
+    ///     row read `exact` over its own `refused` row.
     ///   - shape: how the conversion went. Not a field, so it cannot arrive
     ///     through the projection — and the rules need it, because "the locator
     ///     admitted two positions" is not the fate of any one field.
