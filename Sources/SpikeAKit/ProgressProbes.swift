@@ -580,6 +580,12 @@ enum ProgressProbes {
 
         let honest = unrecordedMetric == 0 && perUnitMismatches == 0 && publicationLevelValues == 0
             && unbacked == 0 && unexplained.isEmpty
+        // **Coverage, not just outcome.** The first run of this probe reported
+        // `yes` while `carriedRows` was 0: every native-first row lost its offset
+        // or had it rebuilt, so the carrier arm had nothing to check and passed
+        // by having nothing to fail. The fixture now carries the missing row;
+        // this guard is what stops it going quiet again.
+        let decided = carriedRows > 0 && progressionRows > 0
 
         // Rendered outside the literal: three levels of nested interpolation is
         // more than this package is willing to bet a CI run on without a local
@@ -589,8 +595,8 @@ enum ProgressProbes {
         return try ProbeOutcome(
             name: "progress-provenance",
             question: "Does the artifact say where each number came from, and refuse to call a rebuilt value carried?",
-            execution: .measured,
-            finding: honest ? .yes : .no,
+            execution: decided ? .measured : .inconclusive,
+            finding: decided ? (honest ? .yes : .no) : nil,
             detail: """
             (a) \(progressionRows) row(s) wrote into locations.progression: \(unrecordedMetric) without recording the dropped metric, \
             \(perUnitMismatches) not the per-resource fraction, \(publicationLevelValues) that are the publication-level number instead. \

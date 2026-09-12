@@ -184,6 +184,29 @@ enum SpikeACases {
                     utf16Offset: p1.utf16Range.lowerBound + 3
                 )
             ))
+
+            // **An offset that is exactly the element's start**, and therefore
+            // the only row in this corpus that can come back `.carried`: the
+            // element has an id, so the locator carries a fragment, and the
+            // fragment names an element whose start is precisely the offset.
+            //
+            // Without this row the provenance probe's "`.carried` needs a
+            // carrier" arm has nothing to check. The first run confirmed it: the
+            // four rows above are all `loses` or `recomputed`, so the arm
+            // reported a `yes` it had not earned — the same defect as a row with
+            // no test, which is how `native-path-anchored` stayed wrong.
+            //
+            // (`+3` is the sibling row and stays: it is the finding that a
+            // fragment names a whole element and so cannot carry an offset
+            // inside one.)
+            cases.append(NativeCase(
+                label: "native-id-anchored-at-element-start",
+                position: NativePosition(
+                    unitID: chapter1.id,
+                    nodeID: .explicitID("p1"),
+                    utf16Offset: p1.utf16Range.lowerBound
+                )
+            ))
         }
 
         // A paragraph with no id at all, so the only identity it has is its path.
