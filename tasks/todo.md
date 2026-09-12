@@ -12,15 +12,20 @@
 所以 **bridge 是对的，错的是测量仪**：`RoundTrip.nativeToLocatorToNative` 把一个由 progression **算回来**的 offset 判成 `.reproduced`，进而报 `.exact`。
 `compare`（反方向）对同一个道理**已经写对了规则**（`RoundTrip.swift:181-186`），只是没施加到「由 progression 推出的那个 offset」上。
 
-- [ ] `RoundTrip.nativeToLocatorToNative`：`.approximate` 解析下 `utf16Offset` 判 `.recomputed`，**数字相等也不判 `.reproduced`**
-- [ ] 同一条规则施加到 `nodeID` —— `.approximate` 下 `nodeIDMatches` 由 `offsetMatches` **蕴含**，判 `.reproduced` 是把恒真式报成「幸存的事实」
-- [ ] outcome → `.semanticEquivalent` 并附 provenance 说明（**不是 `.loses`**：数字相等，bounded-seek 的成功不是失败）
-- [ ] 重写硬编码的说明文字（`RoundTrip.swift:149-151`），改为组装 notes
-- [ ] 根因注释：`fields` 的「survived」→「was carried」；`FieldVerdict.recomputed` 的「different value」措辞
-- [ ] **新增测试**：`.path` 形态的 native-first 断言（目前**零覆盖**），offset 从 fixture 推导不写常数
-- [ ] `SpikeACases.swift:173` 注释补：这一行现在是「path 级身份无法写入 locator」的唯一证据
-- [ ] `docs/adr/0009` 记录 `:60` 的 Pending Spike A 前半落地；`docs/adr/0004` 记表达能力边界与「假的兜底」
-- [ ] 推 CI，**读 artifact 的实际数字**，把真实结果回报（不预先声称）
+- [x] `RoundTrip.nativeToLocatorToNative`：`.approximate` 解析下 `utf16Offset` 判 `.recomputed`，**数字相等也不判 `.reproduced`**
+- [x] 同一条规则施加到 `nodeID` —— `.approximate` 下 `nodeIDMatches` 由 `offsetMatches` **蕴含**，判 `.reproduced` 是把恒真式报成「幸存的事实」
+- [x] outcome → `.semanticEquivalent` 并附 provenance 说明（**不是 `.loses`**：数字相等，bounded-seek 的成功不是失败）
+- [x] 重写硬编码的说明文字，改为组装 notes
+- [x] 根因注释：`fields` 的「survived」→「was carried」；`FieldVerdict.recomputed` 的「different value」措辞
+- [x] **新增测试**：`.path` 形态的 native-first 断言（此前**零覆盖**），offset 从 fixture 推导不写常数
+- [x] `SpikeACases.swift` 注释补：这一行现在是「path 级身份无法写入 locator」的唯一证据
+- [x] `docs/adr/0009` 记录 Pending Spike A 前半落地；`docs/adr/0004` 记表达能力边界与「假的兜底」
+- [x] 推 CI，**读 artifact 的实际数字**（run 34677202575）
+
+**过程中的一处真 bug（靠审查抓到，不是靠 CI）**：`utf16Offset` 有**三种**结果而非两种 —— 我第一版写成
+`(offsetMatches && carried) ? .reproduced : .lost`，`.path` 情形落到 `.lost`，于是 outcome 刚写下「数字相等，报丢失是另一种误报」，
+字段却标着 `.lost`（其含义正是「丢了，本不该丢」）。**同一个 struct 自相矛盾，且会原样进 artifact JSON。**
+两个独立审查代理同时抓到它。修法是显式三分支。
 
 **判据用 `.approximate` 本身，不用 basis 字符串** —— `"progression (clamped)"` 同样可达。
 **不动 `LocationBridge` 任何行为**；不给 bridge 加 `domRange`/`partialCfi`（那会测量一个现实生产者不产出的形状）。
@@ -60,6 +65,37 @@ Spike B 已封版于 `763e2c9`（证明了 Nagi 能掌握**排版**）。Spike A
 
 ## Review
 
+### 第二轮：契约改述为「Anchor 精确 / Progression 有界」（run 34677202575，两 gate 全绿，commit `83c693a`）
+
+```
+Gate 1   116 tests, 0 failures
+Gate 2   Spike A 跨进程指纹 bfbed91025d3… 在 a-run2 / a-run3 均匹配 → MEASURED / yes
+
+identity-round-trip  18 cases: 3 exact, 6 semantic-equivalent, 3 losing fields,
+                     0 blocked for another reason, 6 needing a reanchor.
+                     18 of them cannot confirm identity without a validator.
+```
+
+与预测**逐字吻合**：`native-path-anchored` 由 `exact` 转 `semantic`，另三个 native-first 用例分类不变。读数 **4/5/3/6 → 3/6/3/6**。
+
+#### 实测确认的三件事
+
+1. **`native-path-anchored` 的三条 note 全部进了 artifact**：数字相等但**是算回来的**；`progression` 的 metric 未被 locator 声明，而 ADR-0009 给这条路径的是**有界容差**；且 resolution **自己把它列为 discarded**。这是报告里第一条把「值相等 ≠ 信息被带过去」写成行的话。
+2. **没有任何一例把精确 offset 带了过去。** 唯一看似成功的那个，靠的正是 ADR-0009 禁止的 `Double`。ADR-0004 那句「缺 `AnchorValidator` 的后果比丢失更糟」由此从论断变成 **18/18 的测量**。
+3. **`totalProgression` 的兜底确实是假的**：`unknown-href-with-fallback` 仍落 `needs reanchor`，理由行是「the locator carries nothing this bridge can resolve」—— bridge 找到了 unit，unit 内无物可依。
+
+#### 一处预测失误（记录，不掩饰）
+
+我按手算估 chap1 的 canonical 长度是 74–77，**实测 76**，匿名的那个 `<p>` 是 `21..<29`。对抗审查代理手算的 76 才是对的。**不影响任何判定**（只依赖 offset 落在区间内、且分数反算回同一整数），但手算仍然错了一次。
+
+#### 未做（各自独立一轮）
+
+- **ADR-0009 那条待办的后半**：把往返契约推广到 `sourceBytes` / `canonicalTextIndex` / `fixedPageOrdinal` 等全部 metric —— 需要先有 metric 抽象与容差定义。
+- **`ReanchorService` 的模糊匹配**：本轮仍只判定「需要它」（6 例 `needs reanchor`）。
+- 样本仍是一个 fixture、一套合成 XHTML；ADR-0003 的文档序键问题未触及。
+- 同族测量缺陷（`RoundTrip.swift` 用原始字符串比 href 而 `compare` 用 `Href.isEquivalent`；`.exact` 在两个方向含义不同）。
+
+
 ### Spike A 第一次真实读数（run 34676261279，两个 gate 全绿，commit `945ad92`）
 
 ```
@@ -74,6 +110,9 @@ determinism: measured / yes（跨进程指纹一致）
 ```
 
 #### 最锋利的一条：`fragments` 与 `progression` 不可互换
+
+> ⚠️ **本节结论已在第二轮更正中推翻一半，保留原文仅为留痕。** 两处不成立：(1) `locator(from:)` **同时**发 `fragments` 与 `progression`，不存在「优先发谁」的取舍；(2) 表里那个「**保留**」是**假阳性** —— offset 是拿 ADR-0009 禁止用于精确恢复的 `Double` 算回来的，不是被带过去的。正确的表述见上方第二轮的实测。
+
 
 `native→locator→native` 的三例**全部**丢掉了 `utf16Offset`，而 `native-path-anchored` **保住了**。相关性是完美的：
 
