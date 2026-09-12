@@ -1,0 +1,44 @@
+# Incremental Pagination and PageMap
+
+**Status:** accepted
+
+`PageMap` 是 **disposable derived cache**，允许部分：
+
+```swift
+struct PageMapSnapshot: Sendable {
+    let generation: LayoutGeneration
+    let signature: LayoutSignature
+    let pages: [PageDescriptor]
+    let frontier: NativeDocumentPosition
+    let isComplete: Bool
+}
+```
+
+打开书时只需物化当前 Anchor 附近的 fragment 与若干页，UI 立即可用；后台由 `PaginationEngine` actor 继续推进 frontier。对外**只发布不可变的 `PageMapSnapshot`** —— 不允许后台 append 一个可变数组而主线程并发读。
+
+PageMap 未就绪时总页数未知。产品上显示「第 47 页 / 共 ? 页」，或暂不显示总页数。**页码是派生输出；publication progress 不经由页码**（见 ADR-0009）。
+
+**分页边界**
+
+**v1 的 `DocumentUnit` 是 hard pagination boundary —— 页不跨 unit。** 理由不是「Readium 如此」，而是这样第一版可以隔离一批难题：不同 root style、不同 writing-mode、不同 CSS inheritance root、章节标题、`break-before`、resource 生命周期、页眉归属、unit 加载。
+
+Layout 层从第一天以策略抽象，**不得假定该限制永久存在**：
+
+```swift
+enum FlowBoundaryPolicy { case hard, continuous }
+```
+
+未来允许多个 DocumentUnit 组成连续 `FlowGroup`。**`ContentShard` 永远不是分页边界。**
+
+**强不变量**
+
+> 所有当前可见 `PageScene` 的交互必须完全同步 —— 命中测试、选区起点、链接点击不得触发文档物化、磁盘 IO 或 async 请求。`PageScene` 必须携带完成这些所需的全部局部映射（`PageInteractionMap` 的 text/link/image hit regions 与 glyph cluster mapping）。
+
+**边界：页内同步，跨页允许 async**（多页选区、跨 unit 扩展）。
+
+**Consequences**
+
+- 持久化缓存键必须包含：`DocumentID` + `identitySchemeVersion` + `documentSchemaVersion` + `LayoutSignature` + `layoutAlgorithmVersion`。
+- 任何影响分页的设置必须进入 `LayoutSignature`，**包括字体资源本身的指纹** —— 捆绑字体在 app 更新中换了文件，分页会变，旧 PageMap 即错误。
+- PageMap 在每个 LayoutSignature 下都不同，因此持久化对它而言只是「同设备同配置的冷启动加速」，不是通用缓存。
+- 若 ADR-0003 的文档序键未定，`PageMap` 的二分查找路径无法确定。

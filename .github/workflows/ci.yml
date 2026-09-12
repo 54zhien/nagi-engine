@@ -1,0 +1,73 @@
+# Two gates, deliberately separate.
+#
+# Gate 1 answers exactly one question: does this build, and do the unit tests
+# actually execute? Nothing about CoreText behaviour belongs here. If this job is
+# red, the cause is the implementation or an API assumption — not a finding.
+#
+# Gate 2 is the research half: it runs the spike three times in three separate
+# processes and compares the canonical fingerprints. Determinism is a
+# cross-process property; comparing two layouts inside one process cannot see
+# hash seeding, framework cold-start state, or environment-sensitive ordering.
+# See ADR-0011.
+#
+# Probe findings never fail either job. A probe that comes back "no" is a result
+# about the subject under test — the bundled font genuinely lacking `halt` is the
+# entire point of the census. Only a thrown error (a real defect) or a fingerprint
+# mismatch fails a job.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate-1:
+    name: Gate 1 — build and unit tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+  gate-2:
+    name: Gate 2 — spike run and cross-process determinism
+    runs-on: macos-15
+    needs: gate-1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Baseline run
+        run: swift run spike-b --out .artifacts/run1
+
+      - name: Second process, compared against the baseline
+        run: swift run spike-b --out .artifacts/run2 --expect .artifacts/run1/spike-b.fingerprint
+
+      - name: Third process, compared against the baseline
+        run: swift run spike-b --out .artifacts/run3 --expect .artifacts/run1/spike-b.fingerprint
+
+      - name: Compare canonical fingerprints
+        run: |
+          cmp .artifacts/run1/spike-b.fingerprint .artifacts/run2/spike-b.fingerprint
+          cmp .artifacts/run1/spike-b.fingerprint .artifacts/run3/spike-b.fingerprint
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spike-b-artifacts
+          path: .artifacts/
+          if-no-files-found: warn
