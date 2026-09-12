@@ -299,3 +299,4 @@ final class ProgressMetricTests: XCTestCase {
         XCTAssertTrue(dirty.execution == .measured)
         XCTAssertTrue(dirty.finding == .no)
     }
+}
