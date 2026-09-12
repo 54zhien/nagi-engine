@@ -16,3 +16,6 @@
 | 让脚本/步骤「不可能静默失败」 | 凡是「找不到东西就跳过」的开关（`warn`、`continue-on-error`、`\|\| true`），都必须先问：**它跳过的时候，我能不能从日志里看出来？** 看不出来就是缺陷，不是宽容。 |
 | 写 `XCTAssertEqual` 断言枚举 | **不要写 `XCTAssertEqual(dict["k"], .someCase)`**。字典下标给出 `T?`，前导点成员让泛型参数无法解析，编译器会报 `type 'Equatable' has no member 'someCase'` —— 症状离原因很远。改用 `XCTAssertTrue(dict["k"] == .someCase)`。**这条我在 Spike B 里已经知道并照做，写 Spike A 时又忘了。** |
 | 泛型/成员解析失败时 | 先看**是不是推断不出来**，而不是去找那个不存在的成员。`type 'Equatable' has no member X` / `type 'Double' has no member Y` 都是「我把 X 用在了错误的类型上」，不是「X 不存在」。Spike A 的两次红——`Double.nonNegativeInt` 与 `Equatable.notCarriable`——都是这一类。 |
+| 断言涉及 fixture 的**绝对** offset / 序号 | **不要凭记忆写常数。** 断言不变量（「offset 等于该元素的起点」）而不是数字。Spike A 里同一个测试因为这条错了**两次**：第一次 fixture 的 `<title>` 被算进了阅读流，第二次我把「第一个标题从 0 开始」断言到了段落身上。两次的报错都是一个看起来合理的数字，没有任何东西提示它错。规则：**凡是能写成关系的地方，不要写成常数。** |
+| 新增/修改 fixture 后 | 先用手算（或一段独立脚本）把 canonical text 与关键 offset 算出来，再写断言。Spike A 第三次靠这个才一次通过。 |
+| 测试报 `("9") is not equal to ("4")` 这类「两边都合理」的差异 | 这几乎总是**期望值写错**，不是代码错。先去核对被断言的那个对象到底是什么，而不是去改代码迁就断言。 |

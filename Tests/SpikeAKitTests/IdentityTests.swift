@@ -66,17 +66,22 @@ final class IdentityTests: XCTestCase {
         XCTAssertEqual(position.unitID, "OEBPS/chap1.xhtml")
         XCTAssertEqual(position.nodeID, .explicitID("p1"))
 
-        // The invariant, rather than a constant: the offset is the element's
-        // start, whatever the text before it happens to measure. The first CI
-        // run pinned a literal 0 here and got 9 — because `<title>第一章</title>`
-        // was being counted as reading flow. That is now excluded, but the
-        // assertion states the property instead of a number so the next such
-        // change fails somewhere meaningful.
-        let p1 = try XCTUnwrap(
-            try document().unit(withID: "OEBPS/chap1.xhtml")?.canonical.element(withID: "p1")
+        // Invariants, not constants. Two earlier versions of this test pinned
+        // absolute offsets from memory and were wrong both times — first because
+        // `<title>` was counted as reading flow, then because a paragraph was
+        // assumed to open the text when the heading before it does.
+        let document = try document()
+        let unit = try XCTUnwrap(document.unit(withID: "OEBPS/chap1.xhtml"))
+        let heading = try XCTUnwrap(unit.canonical.element(withID: "ch1"))
+        let p1 = try XCTUnwrap(unit.canonical.element(withID: "p1"))
+
+        XCTAssertEqual(position.utf16Offset, p1.utf16Range.lowerBound, "a fragment resolves to its element's start")
+        XCTAssertEqual(heading.utf16Range.lowerBound, 0, "with `head` excluded, the heading opens the canonical text")
+        XCTAssertEqual(
+            unit.canonical.text(in: p1.utf16Range),
+            "韩立望着眼前的山谷，沉默了片刻。",
+            "and the element it names is the paragraph, not something that merely starts at the same offset"
         )
-        XCTAssertEqual(position.utf16Offset, p1.utf16Range.lowerBound)
-        XCTAssertEqual(p1.utf16Range.lowerBound, 0, "with `head` excluded, the first heading starts the text")
     }
 
     /// The same id exists in both chapters at the same path with the same text.
