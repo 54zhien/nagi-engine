@@ -1,5 +1,29 @@
 # TODO
 
+## 下一阶段：Phase 2.5 —— compare / Resolution / outcome reducer 收口
+
+**顺序已由用户拍板（2026-09-12）：先修测量仪器，再写恢复算法。**
+
+```
+Phase 2.5  compare / Resolution semantics 收口
+           ↓  冻结 transport fidelity 模型
+Phase 3    ReanchorService
+```
+
+理由：`Anchor → Resolution → Reanchor` 是把恢复算法建立在分类器之上。而本轮已经查明分类器**不完全诚实** —— `discarded` 此前不进入最终判断，一次「解析失败」可以报告成「什么都没丢」。在已知有缺陷的仪器上盖恢复算法，之后所有重锚读数都要重新解释。
+
+**待办**（形状见下方「compare 重写的方向」）：
+- [ ] `compare` 不重新「猜」发生了什么：它**消费** bridge / resolver 已经产出的 provenance，不再看 `before == after` 反推
+- [ ] 逐字段的 `original` / `resolved` / `provenance` / `discardReason`（数值只给读者看，判定只读 provenance）
+- [ ] outcome 由字段状态经**一个 reducer** 导出，不再散落手写
+- [ ] `discarded` 成为一等公民：报告里能看到 `FIELD / ORIGINAL / RESOLVED / PROVENANCE`
+- [ ] probe 声明 `minimumEvidenceCount`（见 `lessons.md`）
+- [ ] 重跑 Phase 1 + Phase 2，确认所有旧读数只发生**预期**变化
+
+**三处需要先定的冲突**（用户给出的 reducer 草案与阶段一实测结果不符）：见对话记录 —— ① 草案把 `recomputed` 并入 `semanticEquivalent`，而阶段一实测证明这两者必须分开（唯一的 `semantic` 行是被丢掉引文、**什么都没重算**的那行）；② 草案的四条规则里没有 `requiresValidator` 的位置；③ `FieldResolution.original/resolved` 会把数值摆回判定旁边，需要明文禁止 reducer 读它。
+
+---
+
 ## 当前任务：Spike A 第三轮 —— 先冻结测量规则，再扩张测量面
 
 计划全文见 `C:\Users\Azusa\.claude\plans\curious-scribbling-forest.md`。

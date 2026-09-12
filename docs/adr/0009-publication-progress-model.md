@@ -104,3 +104,35 @@ FB2 的 `<binary>` 内嵌 base64 图片会把字节进度严重扭曲；MOBI 压
 3. **`locations.progression` 是 per-resource，轴的 `progression` 是出版级。** 两者是不同的数，指不同的位置。bridge 写的是前者（`native(from:)` 按 `unit.length` 反算它），而它丢掉的 metric 是 `.canonicalTextIndex` —— 与字段对 EPUB 的 `readiumPositions` 语义**本来就不一致**。这正是本文档早先那条实测（「同一个 `0.5` 在两种 metric 下指不同的位置」）在代码里的样子，现在它被记录了，而不是默默发生。**换成出版级会让每个 offset 都算错，而分划计数仍然全部对得上。**
 
 **准入判据变成了测量，而不是复述。** `progress-layout-independence`：只改容器声明的分页（2 页 → 4 页），同一份字节上问三个 metric —— `sourceBytes` 必须**不动**（锐利臂），`fixedPageOrdinal` 必须**动**（证伪者是一个把页序号实现成字节占比的偷懒写法），`canonicalTextIndex` 必须**不动**（对照臂）。同时测准入侧：容器**没有**声明分页的资源上，页序号必须一律为 `nil` —— metric 拒绝作答，而不是按偶数切一份出来。**一个不可能失败的 probe 没有价值**，所以扫描若一次都没让页序号变化，probe 报 `inconclusive` 而不是 `yes`。
+
+---
+
+## 语义边界（封版，2026-09-12）
+
+本文档此前的措辞把 metric 写成了数值的**附加说明**。实测下来它不是。
+
+```
+Position = 数值 + metric + scope + provenance
+```
+
+**单独一个 `Double` 没有位置语义。** 以下五条是这份文档的核心，其余章节都是它们的推论。
+
+**一、metric 是 Position 的组成部分，不是附加 metadata。**
+`Progression { value, metric }` 里 `metric` **不可选**。这不是防御性编码：它让「取得一个裸 `Double`」变成必须**显式丢标签**的动作，而那个丢弃点正是本文档要盯的地方 —— 丢弃必须被记录，不得默认发生。
+
+**二、不同 metric 的数值空间不可互换，即使底层都是 `Double`。**
+`locations.progression` 是 **resource-local**（Readium 的 `EPUBPositionsService` 每条资源一个，`native(from:)` 按 `unit.length` 反算它）；`publication progression` 是 **publication-global**。同一个 `0.5` 在两者下指不同的位置。
+
+> **这类错误不会 crash，也不会落在错误的 outcome bucket 里。**
+> 把 publication-global 的数写进那个字段，会让 `native-path-anchored` 的 offset 从 22 反算成 **9**，该行从 `recomputedEquivalent` 掉进 `loses(["utf16Offset"])` —— 而**分划桶的和仍然等于总行数**。桶数的是 outcome，不是真相。比显式失败危险得多，因为它看起来完全合理。
+
+**三、metric round trip 只能证明 navigation fidelity，不能证明 identity preservation.**
+本文档性质 1–3 都是导航性质。它们对「这条批注还指着原来那段文字吗」一个字都没说 —— 那是 `AnchorValidator` 的问题，而且要求一条 metric 从未携带过的证据（引文）。**`seek(progress(p))` 落在容差内，不构成 `p` 仍然有意义的任何证据。**
+
+**四、所有 derived position 必须携带 provenance；数值相等不得升级成 carried。**
+一个由分数反算回来的偏移可以**恰好**等于原值（`round(o/L × L) == o` 在 IEEE-754 下对这本 fixture 能触及的每个偏移都成立），所以那种相等**从来就不可能失败**，也就不可能是证据。判定必须看来源，不看数值。
+
+**五、metric 的实现必须声明它的容差与吸附策略；单调性与布局无关性必须被验证，不能被声明。**
+`ProgressMetricAxis` 上可声明的有两项：`seekTolerance`（以 metric 自己的单位）与 `position(near:)` 的**吸附方向**（否则「落在容差内」是一句无法证伪的话 —— 一个「吸附到最近边界」的实现会把请求 4 答成 5，合法、且在容差内）。单调性与布局无关性是**性质**，由 probe 测量，不由实现自陈：一个把页序号写成字节占比的实现也会「声明」自己单调。
+
+**未闭合的一条**：`readiumPositions` 与 `custom` 两个 metric 没有实现，也**不打算为了矩阵对称去凑**。前者需要真实 archive 才能测（否则只是「我们模拟 Readium，再证明我们的模拟符合我们的预测」），后者没有真实消费者，实现它等于凭空发明语义。等正式接入 ReadiumStreamer 时再补真实 fixture。
