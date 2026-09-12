@@ -70,7 +70,56 @@ utf16Offset   22   22   recomputed from progression, bounded by 0.5 canonicalTex
 - [x] 推之前必跑 ① 全仓库 `{` / `}` 逐文件平衡 → **33 文件 / 0 问题**（脚本见 `%TEMP%\bracecheck.py`）
 - [x] 推之前必跑 ② 独立代理核编译面与桶位 → **跑过了，报 11 处发现**（9 处已修），但**它把一处编译错误判成「complete」**：`table.map(\.provenanceOnly)`，而 `provenanceOnly` 定义在 `FieldResolution` 上、`table` 是 `[FieldProvenance]`。见 `lessons.md` 新增那条。
 - [x] 推 CI run 34702448668 → **Gate 1 红**（上面那处编译错误，`RoundTrip.swift:290` / `:335`），Gate 2 因 `needs: gate-1` 被 skip。已修，重推。
-- [ ] 修完重推，读实际读数
+- [x] 修完重推 `15aac0b`，CI run 34702577605 **两 gate 全绿**
+
+#### 第二次推送的实际读数（run 34702577605，两 gate 全绿，commit `15aac0b`）
+
+```
+Gate 1   140 tests / 0 failures   （上轮 136，+4：IdentityTests ×3 + ProgressMetricTests ×1）
+Gate 2   fingerprint 2001124351669c65… 三进程一致 → MEASURED / yes
+         （第一次推送 34702448668 Gate 1 红，见上；Gate 2 被 skip）
+
+identity-round-trip  21 cases: 5 exact, 5 recomputed-equivalent, 2 semantic-equivalent,
+                     3 losing fields, 0 blocked, 6 needing a reanchor
+                     needingValidator = 16
+progress-provenance  MEASURED yes
+  (a) progressionRows=5  unrecordedMetric=0  unrecordedScope=0
+      perUnitMismatches=0  publicationLevelValues=0
+      written 0.289474 vs per-resource 0.289474 vs publication-level 0.117647
+  (b) carriedOffsetRows=1  unbackedCarriedRows=0
+  (c) discardedFields=7  distinctRefusals=5
+  (d) statedFieldRows=39  missingStatedFields=0  unexplainedExtraFields=0
+四个 metric probe 全 MEASURED / yes，数一个没动
+```
+
+**预测逐条命中，无一偏离**：
+
+| 判据 | 预测 | 实际 |
+|---|---|---|
+| 20 个旧行的桶 | 逐个不动（5/5/1/3/6） | **5/5/1/3/6，逐个不动** ✓ |
+| 第 21 行 | `semanticEquivalent` | `semantic`（1→2）✓ |
+| `needsValidator` | 20/20 → 16/21 | **16** ✓ |
+| `needsReanchor` | 6/20 → 6/21 | **6** ✓ |
+| (c) `discardedFields` | 19 → 7 | **7** ✓ |
+| (c) `distinctRefusals` | 5 → 5 | **5** ✓ |
+| (d) `statedFieldRows` | 39 | **39** ✓ |
+
+#### 读数里三件值得单独看的事
+
+1. **`exact` 行里第一次没有 `refused` 行。** `id-anchored` 现在只有 `href` 与 `fragments` 两行、都 `carried`，加两条 `~` observation。本轮开头那句「`exact` 与它自己的表矛盾」在 artifact 里已不可复现。
+2. **`js-shaped-selector` 的假话没了。** 它现在读 `fragments … recomputed from cssSelector`，注释是「came back by way of the cssSelector the locator stated… Nothing was compared with anything」；旧的 `bound == nil` 那句「the request was outside the range」不再出现在任何一行上。
+3. **artifact 自己证明了 `mixed-evidence-locator` 的注释之前是假的**：该行印着 `progression 0.250000 → 0.052632 refused` —— 输入声明的是 0.25，而 export 从 offset 4 写出的是 0.052632（= 4/76）。两条通道**确实不指同一个点**，这正是推前把那段注释改掉的理由。
+
+#### 本轮新发现、留给下一轮的一处（**推前审查代理没报，是读 artifact 时看见的**）
+
+**报告文本的列宽失配**：`pad(_:_:)` 在 `text.count >= width` 时**原样返回不截断**，所以长值会挤进下一列。`OEBPS/chap1.xhtml`（17 字符）撞 14 宽，`body > p:nth-child(3)`（24 字符）撞得更狠：
+
+```
+      href                  OEBPS/chap1.xhtmlOEBPS/chap1.xhtmlcarried
+      cssSelector           body > p:nth-child(3)—             refused: …
+```
+
+**既存问题**（`href` 那一列一直在挤），但**修 6 让它更显眼** —— 拒绝行以前渲染 `—`（1 字符）不会溢出，现在渲染真实值就会。**只影响 stdout 的人读表，不影响任何读数**（读数是 JSON 与 probe 的 `numbers`，位置固定）。修法是 `pad` 加截断+省略号，或把列宽调宽。下一轮顺手做。
 
 #### 执行前拍板 / 修正（计划文件内部有四处自相矛盾，以此为准）
 
