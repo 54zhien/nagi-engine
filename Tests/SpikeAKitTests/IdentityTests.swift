@@ -171,12 +171,15 @@ final class IdentityTests: XCTestCase {
                 href: "OEBPS/chap1.xhtml",
                 mediaType: "application/xhtml+xml",
                 locations: .init(fragments: ["p1"]),
-                text: .init(before: "", highlight: "韩立望着眼前", after: "山谷")
+                text: .init(after: "山谷", before: "", highlight: "韩立望着眼前")
             ),
             in: try document(),
             label: "id-anchored-with-quotation"
         )
-        XCTAssertEqual(trip.fields["text"], .notCarriable)
+        // `==` rather than `XCTAssertEqual`: a leading-dot member against a
+        // dictionary subscript leaves the generic parameter unresolved, and the
+        // compiler reports it as "type 'Equatable' has no member …".
+        XCTAssertTrue(trip.fields["text"] == .notCarriable)
         guard case .semanticEquivalent(let notes) = trip.outcome else {
             return XCTFail("expected semantic equivalence, got \(trip.outcome)")
         }
@@ -219,9 +222,9 @@ final class IdentityTests: XCTestCase {
             in: try document(),
             label: "positions-service-shaped"
         )
-        XCTAssertEqual(trip.fields["progression"], .recomputed)
-        XCTAssertEqual(trip.fields["position"], .documentLevel)
-        XCTAssertEqual(trip.fields["totalProgression"], .documentLevel)
+        XCTAssertTrue(trip.fields["progression"] == .recomputed)
+        XCTAssertTrue(trip.fields["position"] == .documentLevel)
+        XCTAssertTrue(trip.fields["totalProgression"] == .documentLevel)
     }
 
     /// Native → Publication → Native is the direction a stored position
@@ -254,6 +257,9 @@ final class IdentityTests: XCTestCase {
             in: document,
             label: "native-inside-surrogate-pair"
         )
-        XCTAssertEqual(trip.fields["utf16Offset"], .reproduced, "the bridge does not round, and does not snap")
+        XCTAssertTrue(
+            trip.fields["utf16Offset"] == .reproduced,
+            "the bridge does not round, and does not snap"
+        )
     }
 }

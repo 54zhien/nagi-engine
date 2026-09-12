@@ -14,3 +14,5 @@
 | 判断「网络问题」还是「工具问题」 | 用第二个工具对**同一个端点**测一次。curl 通、gh 断 → 是工具/协议栈问题，不是网络问题。这一步把三次故障一次性定位清楚。 |
 | 上传 CI 产物 | `actions/upload-artifact` **默认跳过隐藏文件**。产物目录若叫 `.artifacts/`（点开头），会**静默传空** —— 而且 `if-no-files-found: warn` 会让这一步显示为 success。用非隐藏目录，并把该选项设成 `error`。这与 `writePNG` 那个「静默丢失产物」是同一类故障，只是发生在不同层。 |
 | 让脚本/步骤「不可能静默失败」 | 凡是「找不到东西就跳过」的开关（`warn`、`continue-on-error`、`\|\| true`），都必须先问：**它跳过的时候，我能不能从日志里看出来？** 看不出来就是缺陷，不是宽容。 |
+| 写 `XCTAssertEqual` 断言枚举 | **不要写 `XCTAssertEqual(dict["k"], .someCase)`**。字典下标给出 `T?`，前导点成员让泛型参数无法解析，编译器会报 `type 'Equatable' has no member 'someCase'` —— 症状离原因很远。改用 `XCTAssertTrue(dict["k"] == .someCase)`。**这条我在 Spike B 里已经知道并照做，写 Spike A 时又忘了。** |
+| 泛型/成员解析失败时 | 先看**是不是推断不出来**，而不是去找那个不存在的成员。`type 'Equatable' has no member X` / `type 'Double' has no member Y` 都是「我把 X 用在了错误的类型上」，不是「X 不存在」。Spike A 的两次红——`Double.nonNegativeInt` 与 `Equatable.notCarriable`——都是这一类。 |
