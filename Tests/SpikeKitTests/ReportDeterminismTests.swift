@@ -200,20 +200,6 @@ final class ReportDeterminismTests: XCTestCase {
         ))
     }
 
-    // MARK: - The measurement canvas
-
-    /// The kinsoku sweep measures on a very large canvas, not an infinite one.
-    /// This predicate is what stops "the text ran out of room" from being read as
-    /// "CoreText broke the line here" — the failure mode that would silently
-    /// corrupt the probe's conclusion.
-    func testCanvasHeadroomBoundary() {
-        let canvas = Double(SpikeB.measurementCanvasHeight)
-        XCTAssertTrue(SpikeB.canvasIsUnconstraining(contentHeight: canvas * 0.5))
-        XCTAssertTrue(SpikeB.canvasIsUnconstraining(contentHeight: canvas * 0.89))
-        XCTAssertFalse(SpikeB.canvasIsUnconstraining(contentHeight: canvas * 0.91))
-        XCTAssertFalse(SpikeB.canvasIsUnconstraining(contentHeight: canvas))
-    }
-
     // MARK: - Glyph coverage
 
     func testGlyphCoverageFormatsScalarsAsSortedHex() {

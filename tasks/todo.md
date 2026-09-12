@@ -19,6 +19,60 @@
 
 ## Review
 
+### Gate 2 第一次真实结果（2026-09-12，run 34672568307）
+
+两个 gate 全绿：`swift build` ✓、66 个测试全部执行并通过 ✓、三次进程指纹 `cmp` 一致 ✓。
+评审图已取回并**逐张看过**（此前一直被静默丢弃）。
+
+#### 第三类 —— CoreText 实际行为（Spike 的真正产出）
+
+| # | 结果 | 与假设的关系 |
+|---|---|---|
+| F1 | **CoreText 确实为 ruby 让出行高**：`plainLineHeight 22.400 → rubyLineHeight 30.400`，`delta = 8.000pt`，恰为 `fontSize 16 × sizeFactor 0.5` | **与 ADR-0005 冲突**。ADR 写「不得指望 CoreText 自动为 ruby 让出行高」。**但见 P3 —— 这次测量不干净，不足以据此改 ADR。** |
+| F2 | **CoreText 默认断行已实现禁则**，与 `kCTLanguageAttributeName` 无关：29 个宽度下 tagged 与 untagged 的违规数**都是 0**，2152 个行末被检查 | 修正了 probe 的原始假设。UAX #14 LB13 本身就禁止在收尾标点前断行。 |
+| F3 | 字体缺 `halt` `palt` `vrt2` `kern` `locl` 等 10 项，只有 `aalt` `vert` | 预判命中。**标点压缩只能由 Nagi 自己做。** |
+| F4 | 竖排串接不卡死（但见 P2，这个 yes 的含义要打折） | — |
+
+#### 第一类 —— 实现错误（我的代码）
+
+| # | 问题 | 状态 |
+|---|---|---|
+| I1 | **`ruby.png` 是一张纯白空图**。布局框是 10000×10000（为了不折行），渲染位图只有 400×120，而 `CTFrameDraw` 把首行放在 path 顶部 → 文字落在画布外。**从第一次运行起就是空的。** | 待修 |
+| I2 | **`writePNG` 的校验（文件存在 + size > 0）必要但不充分**：空白 PNG 完全满足它。真实的告警信号是三张图的字节数 —— `ruby.png 1244` vs `page-0.png 80992` / `vertical-column-0.png 82696`，两个数量级的差距一直印在日志里。 | 待修（建议加「frame 的 path 必须放得下位图」的守卫） |
+| I3 | 评审图被 `actions/upload-artifact` 静默丢弃（隐藏目录 + `if-no-files-found: warn`） | **已修** `decf225` |
+
+#### 待用户裁决 —— 实验有效性（第二类的一半）
+
+| # | 问题 |
+|---|---|
+| P1 | `kinsoku-language-tag` 报 `yes`，但**对照组同样是 0 违规** —— 没有任何可测之差。按既定原则（只有确实测到目标行为才允许产出 yes/no）应为 `INCONCLUSIVE`。判定式 `taggedViolations == 0 ? .yes : .no` 忽略了对照组。 |
+| P2 | `vertical-column-flow` 的框是 **480 宽**，实际每屏容纳约 17 条竖列；`columns = 2` 数的是**屏数不是列数**（340 字/屏 × 2 ≈ 407 ✓ 数学吻合）。它声称的「单列串行」这个风险点从未被测到。名字与度量不符。 |
+| P3 | `ruby-line-height` 的 base `東京` 中 **`東` 无字形**（已用独立 cmap 解析复核）。F1 的 8.000pt 是在部分 `.notdef` 的 base 上测出来的，**不干净**。 |
+
+#### 本轮修复（按「先 I1+I2，再 P1/P2」）
+
+| # | 修法 |
+|---|---|
+| I1 | ruby 评审图改用**自己的一帧**渲染，其 box 就是画布（400×120）；测量仍用 10000pt 的 box。doc 注释写明「CoreText 把首行放在 path 顶部」这一机制。 |
+| I2 | `writePNG` 增加守卫：读 `CTFrameGetPath(frame)` 的 `boundingBoxOfPath`，与位图尺寸比较，放不下即 throw。空白 PNG 从此不再可能悄悄产出。 |
+| P1 | 判定规则抽成**纯函数** `Kinsoku.decide(tagged:untagged:contentHeight:canvasHeight:)`，因为它正是出错的那一环。**对照组现在参与判定**：两臂都干净 → `inconclusive`（无可测之差）；tagged 干净而对照组有违规 → `yes`；tagged 有违规 → `no`。实验有效性（行末检查被绕过、画布被顶到）优先于比较。 |
+| P2 | `chainColumns` 的 box 改为**一列宽**（`lineExtent` = 单字排版高度），因为 `rightToLeft` 下「框宽就是列距」——框和页面一样宽会让每帧塞下一整页竖列，`columns` 就变成数页数。`measureWidth` 仍是一列的长度。竖排评审图保持整页视野不变（两者回答不同问题，已在注释里说明）。 |
+| P3 | ruby probe 增加**字形覆盖自证**：base 含字体未覆盖字符（本轮即 `東`）→ `inconclusive`，detail 说明「有 fallback 时行度量可能来自替代字体，不能归因于被测字体」。**不动语料** —— 改语料该是一次有意识的动作，不是为了让测量变干净。 |
+
+新增 7 个测试（其中 `testCleanControlMeansNothingWasMeasured` 就是 P1 那个缺陷的回归），删除 1 个已失效的 canvas 测试，共 **72 个**。
+
+#### 已独立复核为正确的
+
+- `glyph-coverage` 报缺 `U+6771 東`、`U+30FC ー` —— 我用直接 cmap 解析复核，二者确实 glyph 0，探针无误。
+- 跨进程确定性：3 个进程的 PNG **逐字节相同**、fingerprint 相同；完整 `spike-b.json` **不同**，差异恰为 `determinism.expectedFingerprint`（run1 为 null）—— 正是「指纹只覆盖 canonical payload」要保住的性质。
+- 禁则的假 PASS 修复生效：`inspectedLineEnds = 2152 > 0`，464 个硬断行未使任何行末检查被绕过。
+
+#### 附带查明的字体身份
+
+`NagiRounded-Regular.ttf` 的真实 face 是 **`STYuanti-SC-Regular` / 华文圆体 / Yuanti SC**（SinoType 商业字体），文件名与内容不符。仓库私有故无暴露问题；`Seidoku` 将系统字体打入 app bundle 属产品/法务问题，此处仅记录。
+
+### 早前 Review
+
 ### Gate 1 —— 第一次真实编译（2026-09-12）
 
 仓库 `54zhien/nagi-engine`（private）已建，`main` 已推，CI 已跑。

@@ -323,13 +323,40 @@ public enum TextLayout {
         )
     }
 
+    /// The vertical space one line wants. Used to make a frame exactly one
+    /// column wide; measured off a single ideograph so the pitch does not depend
+    /// on the corpus.
+    static func lineExtent(font: CTFont, lineSpacing: CGFloat) -> CGFloat {
+        let probe = NSAttributedString(
+            string: "永",
+            attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font]
+        )
+        var ascent: CGFloat = 0
+        var descent: CGFloat = 0
+        var leading: CGFloat = 0
+        _ = CTLineGetTypographicBounds(
+            CTLineCreateWithAttributedString(probe), &ascent, &descent, &leading
+        )
+        return ascent + descent + leading + lineSpacing
+    }
+
     /// Column-by-column chaining via `CTFrameGetVisibleStringRange`, which is
     /// the documented frame-chaining primitive. Used only by the vertical probe,
     /// where the horizontal fill model does not apply.
+    ///
+    /// The box is ONE column wide on purpose. Under `rightToLeft` progression the
+    /// columns advance across the box's width, so that width IS the column pitch:
+    /// a box as wide as the page makes every frame hold a whole page of vertical
+    /// lines, and `columns` silently starts counting pages instead of columns.
+    /// That is what the first real run reported — 407 UTF-16 units "in 2 columns",
+    /// which is really two pages of roughly seventeen lines each.
+    ///
+    /// `measureWidth` is the length of a column (the vertical space available),
+    /// which is why the box is built as pitch × measureWidth.
     public static func chainColumns(_ input: LayoutInput, maxColumns: Int) -> (columns: Int, consumed: Int, terminated: Bool) {
         let attributed = attributedString(input)
         let framesetter = CTFramesetterCreateWithAttributedString(attributed)
-        let columnWidth = input.pageHeight
+        let columnWidth = lineExtent(font: input.font, lineSpacing: input.lineSpacing)
         let columnHeight = input.measureWidth
         let frameAttributes: [CFString: Any] = [
             kCTFrameProgressionAttributeName: NSNumber(
@@ -375,6 +402,24 @@ public enum Renderer {
     public static func writePNG(frame: CTFrame, size: CGSize, to url: URL) throws -> Int {
         let width = Int(size.width.rounded())
         let height = Int(size.height.rounded())
+
+        // A frame draws its first line at the TOP of its own layout path, so a
+        // frame built for a much larger box puts the text far above the bitmap
+        // and produces a blank image — which satisfies every "the file exists and
+        // is not empty" check, and is how `ruby.png` shipped empty from the first
+        // run. Comparing the frame's own path against the bitmap is what turns
+        // that into a loud failure. (The context is 1:1, so points == pixels.)
+        let framePath: CGPath? = CTFrameGetPath(frame)
+        guard let box = framePath?.boundingBoxOfPath else {
+            throw SpikeError.renderingFailed("frame carries no layout path")
+        }
+        guard box.width <= CGFloat(width), box.height <= CGFloat(height) else {
+            throw SpikeError.renderingFailed(
+                "frame is laid out for \(Int(box.width))x\(Int(box.height))pt but the bitmap is "
+                    + "\(width)x\(height)px — the text would land off-canvas"
+            )
+        }
+
         guard width > 0, height > 0,
               let context = CGContext(
                   data: nil,
@@ -423,6 +468,11 @@ public enum Renderer {
 // MARK: - Kinsoku inspection
 
 public enum Kinsoku {
+    /// The fraction of the measurement canvas the content may occupy before the
+    /// layout can no longer be attributed to line breaking rather than to running
+    /// out of room.
+    public static let canvasHeadroom: Double = 0.9
+
     public struct Violations: Sendable {
         public var lineStartsWithProhibited: Int
         public var lineEndsWithProhibited: Int
@@ -433,7 +483,28 @@ public enum Kinsoku {
         /// inspected.
         public var inspectedLineEnds: Int
 
+        public init(
+            lineStartsWithProhibited: Int,
+            lineEndsWithProhibited: Int,
+            hardBreakLines: Int,
+            inspectedLineEnds: Int
+        ) {
+            self.lineStartsWithProhibited = lineStartsWithProhibited
+            self.lineEndsWithProhibited = lineEndsWithProhibited
+            self.hardBreakLines = hardBreakLines
+            self.inspectedLineEnds = inspectedLineEnds
+        }
+
         public var total: Int { lineStartsWithProhibited + lineEndsWithProhibited }
+
+        /// Folds one more layout's inspection into this total, so a sweep can
+        /// accumulate per arm without the caller open-coding four additions.
+        public mutating func add(_ other: Violations) {
+            lineStartsWithProhibited += other.lineStartsWithProhibited
+            lineEndsWithProhibited += other.lineEndsWithProhibited
+            hardBreakLines += other.hardBreakLines
+            inspectedLineEnds += other.inspectedLineEnds
+        }
 
         /// True when the measurement could not have detected a line-end
         /// violation: there were hard-broken lines, yet no line end was ever
@@ -478,6 +549,77 @@ public enum Kinsoku {
             lineEndsWithProhibited: endViolations,
             hardBreakLines: hardBreakLines,
             inspectedLineEnds: inspectedLineEnds
+        )
+    }
+
+    /// The probe's decision.
+    public struct Decision: Sendable {
+        public var execution: ProbeOutcome.Execution
+        public var finding: ProbeOutcome.Finding?
+        public var detail: String
+    }
+
+    /// Decides what the kinsoku probe may conclude.
+    ///
+    /// Kept pure and separate from the probe because this rule was wrong once,
+    /// and being wrong here is invisible: the first real run looked only at the
+    /// tagged arm and reported "yes" for a sweep in which the untagged control
+    /// had also seen zero violations — a measurement with nothing to measure.
+    ///
+    /// Experiment validity comes first, because neither of those failures says
+    /// anything about the language tag.
+    public static func decide(
+        tagged: Violations,
+        untagged: Violations,
+        contentHeight: Double,
+        canvasHeight: Double
+    ) -> Decision {
+        let hardBreakLines = tagged.hardBreakLines + untagged.hardBreakLines
+        let inspectedLineEnds = tagged.inspectedLineEnds + untagged.inspectedLineEnds
+
+        if hardBreakLines > 0 && inspectedLineEnds == 0 {
+            return Decision(
+                execution: .inconclusive,
+                finding: nil,
+                detail: "\(hardBreakLines) hard-broken lines but no line end was inspected — "
+                    + "the line-end check was bypassed, so this probe cannot conclude"
+            )
+        }
+        if contentHeight >= canvasHeight * canvasHeadroom {
+            return Decision(
+                execution: .inconclusive,
+                finding: nil,
+                detail: "content height \(String(format: "%.1f", contentHeight))pt reached "
+                    + "\(Int(canvasHeadroom * 100))% of the \(Int(canvasHeight))pt canvas — "
+                    + "the layout may have been clamped, so this probe cannot conclude"
+            )
+        }
+
+        // The untagged arm is a control, not decoration: the question is whether
+        // the tag BUYS 禁則処理, and a control that is equally clean means there
+        // was nothing for it to buy.
+        if tagged.total == 0 && untagged.total == 0 {
+            return Decision(
+                execution: .inconclusive,
+                finding: nil,
+                detail: "both the tagged run and its untagged control were clean across the sweep "
+                    + "(\(inspectedLineEnds) line ends inspected) — the tag made no measurable "
+                    + "difference, so this probe cannot conclude"
+            )
+        }
+        if tagged.total == 0 {
+            return Decision(
+                execution: .measured,
+                finding: .yes,
+                detail: "the tagged run had no violations while the untagged control produced "
+                    + "\(untagged.total) — the tag removed violations the control showed"
+            )
+        }
+        return Decision(
+            execution: .measured,
+            finding: .no,
+            detail: "\(tagged.total) violations remain with the run tagged \"ja\" "
+                + "(untagged produced \(untagged.total))"
         )
     }
 

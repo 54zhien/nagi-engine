@@ -29,19 +29,9 @@ public enum SpikeB {
     ///
     /// But a canvas that is merely very large is not the same as one that cannot
     /// constrain the layout, and confusing the two would mean reading "the text
-    /// ran out of room" as "CoreText broke the line here". `canvasIsUnconstraining`
-    /// is what keeps that distinction.
+    /// ran out of room" as "CoreText broke the line here". `Kinsoku.decide`
+    /// applies that headroom rule.
     public static let measurementCanvasHeight: CGFloat = 1_000_000
-
-    /// How much of the canvas the content may occupy before the sweep stops
-    /// trusting its own measurement.
-    static let canvasHeadroom: CGFloat = 0.9
-
-    /// True when the content stayed well clear of the canvas, so that line
-    /// breaking reflects 禁則 rather than running out of room.
-    static func canvasIsUnconstraining(contentHeight: Double) -> Bool {
-        contentHeight < Double(measurementCanvasHeight * canvasHeadroom)
-    }
 
     /// The width sweep for the kinsoku probe. Hand-placing a prohibited
     /// character at a line edge goes stale the moment the font changes; a sweep
@@ -107,11 +97,14 @@ public enum SpikeB {
         ))
 
         // ---- Kinsoku: tagged vs untagged ---------------------------------
-        var taggedViolations = 0
-        var untaggedViolations = 0
-        var hardBreakLines = 0
-        var inspectedLineEnds = 0
-        var worstTaggedCase = ""
+        // The untagged arm is a control, not decoration, so the two arms are
+        // accumulated separately. The rule that reads them lives in
+        // `Kinsoku.decide`, where it can be tested without a font.
+        var tagged = Kinsoku.Violations(
+            lineStartsWithProhibited: 0, lineEndsWithProhibited: 0,
+            hardBreakLines: 0, inspectedLineEnds: 0
+        )
+        var untagged = tagged
         var contentHeight = 0.0
 
         for width in sweepWidths {
@@ -129,45 +122,36 @@ public enum SpikeB {
                 let report = try TextLayout.layout(input).report
                 contentHeight = max(contentHeight, report.totalTextHeight)
                 let violations = Kinsoku.inspect(lines: report.lines, in: Fixture.body)
-                hardBreakLines += violations.hardBreakLines
-                inspectedLineEnds += violations.inspectedLineEnds
-
                 if tag == nil {
-                    untaggedViolations += violations.total
+                    untagged.add(violations)
                 } else {
-                    taggedViolations += violations.total
-                    if violations.total > 0 && worstTaggedCase.isEmpty {
-                        worstTaggedCase = "at width \(Int(width))pt: \(violations.lineStartsWithProhibited) line-start, \(violations.lineEndsWithProhibited) line-end"
-                    }
+                    tagged.add(violations)
                 }
             }
         }
 
-        // Two ways this measurement can be vacuous, and both must be reported as
-        // such rather than as a clean sweep: no line end was ever inspected (so
-        // an end violation could not have been seen), or the content ran into the
-        // canvas (so the breaks are about running out of room, not 禁則).
-        let lineEndChecksBypassed = hardBreakLines > 0 && inspectedLineEnds == 0
-        let canvasClamped = !canvasIsUnconstraining(contentHeight: contentHeight)
-        let kinsokuInconclusive = lineEndChecksBypassed || canvasClamped
+        let kinsokuDecision = Kinsoku.decide(
+            tagged: tagged,
+            untagged: untagged,
+            contentHeight: contentHeight,
+            canvasHeight: Double(measurementCanvasHeight)
+        )
         probes.append(try ProbeOutcome(
             name: "kinsoku-language-tag",
             question: "Does kCTLanguageAttributeName actually buy 禁則処理?",
-            execution: kinsokuInconclusive ? .inconclusive : .measured,
-            finding: kinsokuInconclusive ? nil : (taggedViolations == 0 ? .yes : .no),
-            detail: lineEndChecksBypassed
-                ? "\(hardBreakLines) hard-broken lines but no line end was inspected — the line-end check was bypassed, so this probe cannot conclude"
-                : (canvasClamped
-                    ? "content height \(String(format: "%.1f", contentHeight))pt reached \(Int(canvasHeadroom * 100))% of the \(Int(measurementCanvasHeight))pt canvas — the layout may have been clamped, so this probe cannot conclude"
-                    : (taggedViolations == 0
-                        ? "no violations across \(sweepWidths.count) swept widths with the run tagged \"ja\"; untagged produced \(untaggedViolations); \(inspectedLineEnds) line ends inspected"
-                        : "\(taggedViolations) violations remain with the run tagged \"ja\" (untagged produced \(untaggedViolations)); first case \(worstTaggedCase)")),
+            execution: kinsokuDecision.execution,
+            finding: kinsokuDecision.finding,
+            detail: kinsokuDecision.detail,
             numbers: [
-                "taggedViolations": Double(taggedViolations),
-                "untaggedViolations": Double(untaggedViolations),
+                "taggedViolations": Double(tagged.total),
+                "taggedLineStart": Double(tagged.lineStartsWithProhibited),
+                "taggedLineEnd": Double(tagged.lineEndsWithProhibited),
+                "untaggedViolations": Double(untagged.total),
+                "untaggedLineStart": Double(untagged.lineStartsWithProhibited),
+                "untaggedLineEnd": Double(untagged.lineEndsWithProhibited),
                 "sweptWidths": Double(sweepWidths.count),
-                "hardBreakLines": Double(hardBreakLines),
-                "inspectedLineEnds": Double(inspectedLineEnds),
+                "hardBreakLines": Double(tagged.hardBreakLines + untagged.hardBreakLines),
+                "inspectedLineEnds": Double(tagged.inspectedLineEnds + untagged.inspectedLineEnds),
                 "contentHeight": contentHeight,
                 "canvasHeight": Double(measurementCanvasHeight)
             ]
@@ -192,7 +176,7 @@ public enum SpikeB {
             rubySizeFactor: rubySizeFactor
         )
         let (plainReport, _) = try TextLayout.layout(plainInput)
-        let (rubyReport, rubyFrame) = try TextLayout.layout(rubyInput)
+        let (rubyReport, _) = try TextLayout.layout(rubyInput)
 
         let plainHeight = (plainReport.lines.first.map { $0.ascent + $0.descent + $0.leading }) ?? 0
         let rubyHeight = (rubyReport.lines.first.map { $0.ascent + $0.descent + $0.leading }) ?? 0
@@ -202,13 +186,28 @@ public enum SpikeB {
         // produced exactly one line. A wrapped run would be measuring where the
         // line broke, not how tall it is.
         let singleLine = plainReport.lineCount == 1 && rubyReport.lineCount == 1
+
+        // And it only means anything if the base text is renderable in the font
+        // under test. `東京` contains 東, which this face has no glyph for, so the
+        // metrics may come from a fallback face and cannot be attributed to the
+        // bundled font. Checking it here rather than correcting the fixture keeps
+        // the corpus change a deliberate act.
+        let rubyBaseCoverage = FontCoverage.measure(
+            font: font,
+            characters: Array(Fixture.rubyBase)
+        )
+        let baseIsRenderable = rubyBaseCoverage.missingCharacters == 0
+        let measurable = singleLine && baseIsRenderable
+
         probes.append(try ProbeOutcome(
             name: "ruby-line-height",
             question: "Does CoreText reserve line height for ruby, or must Nagi do it?",
-            execution: singleLine ? .measured : .inconclusive,
-            finding: singleLine ? (heightDelta > 0.5 ? .yes : .no) : nil,
-            detail: !singleLine
-                ? "the measurement wrapped (\(plainReport.lineCount) plain / \(rubyReport.lineCount) ruby lines) — line breaking is not the variable under test, so this probe cannot conclude"
+            execution: measurable ? .measured : .inconclusive,
+            finding: measurable ? (heightDelta > 0.5 ? .yes : .no) : nil,
+            detail: !measurable
+                ? (baseIsRenderable
+                    ? "the measurement wrapped (\(plainReport.lineCount) plain / \(rubyReport.lineCount) ruby lines) — line breaking is not the variable under test, so this probe cannot conclude"
+                    : "the ruby base \(Fixture.rubyBase) contains \(rubyBaseCoverage.missingCharacters) character(s) the bundled font does not cover (\(rubyBaseCoverage.missingScalars.joined(separator: " "))) — with font fallback the line metrics may come from a substituted face, so this probe cannot conclude")
                 : (heightDelta > 0.5
                     ? "ruby at size factor \(rubySizeFactor) raised the line box by \(String(format: "%.3f", heightDelta))pt — CoreText accounts for it"
                     : "ruby at size factor \(rubySizeFactor) changed the line box by \(String(format: "%.3f", heightDelta))pt — CoreText does NOT reserve space; Nagi must compute annotationBeforeExtent itself (ADR-0005)"),
@@ -218,6 +217,7 @@ public enum SpikeB {
                 "delta": heightDelta,
                 "plainLineCount": Double(plainReport.lineCount),
                 "rubyLineCount": Double(rubyReport.lineCount),
+                "rubyBaseMissingGlyphs": Double(rubyBaseCoverage.missingCharacters),
                 // Reported so a future API misuse shows up here rather than
                 // leaving every assertion green while the experiment changed.
                 "requestedRubySizeFactor": Double(rubySizeFactor)
@@ -287,19 +287,21 @@ public enum SpikeB {
             to: outputDirectory.appendingPathComponent("page-0.png")
         ))
 
-        // `TextLayout.layout` already built this frame; `requireFrame` is only
-        // the fallback for when it did not produce one. Spelled as a statement
-        // rather than `rubyFrame ?? try requireFrame(...)`: `try` may not sit to
-        // the right of `??`.
-        let rubyFrameToRender: CTFrame
-        if let rubyFrame {
-            rubyFrameToRender = rubyFrame
-        } else {
-            rubyFrameToRender = try requireFrame(rubyInput)
-        }
+        // The ruby MEASUREMENT box is 10,000pt so nothing wraps, but rendering
+        // that frame would put the text 10,000pt above the bitmap — CoreText
+        // draws the first line at the top of its path — and produce a blank
+        // image. The review image gets a frame whose box IS the canvas.
+        let rubyCanvas = CGSize(width: 400, height: 120)
+        let rubyRenderInput = LayoutInput(
+            text: rubyBaseText, font: font, fontSize: fontSize,
+            measureWidth: rubyCanvas.width, pageHeight: rubyCanvas.height,
+            lineSpacing: 0, label: "ruby-render",
+            ruby: (annotation: Fixture.rubyAnnotation, range: rubyRange),
+            rubySizeFactor: rubySizeFactor
+        )
         let rubyArtifact = ArtifactRecord(byteCount: try Renderer.writePNG(
-            frame: rubyFrameToRender,
-            size: CGSize(width: 400, height: 120),
+            frame: try requireFrame(rubyRenderInput),
+            size: rubyCanvas,
             to: outputDirectory.appendingPathComponent("ruby.png")
         ))
 

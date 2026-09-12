@@ -229,7 +229,114 @@ final class PrimaryTextContractTests: XCTestCase {
         )
     }
 
+    // MARK: - The kinsoku verdict rule
+
+    /// The regression that matters most. A sweep in which BOTH arms are clean has
+    /// nothing to measure: the probe asks whether the language tag *buys* 禁則,
+    /// and a control that is equally clean means there was nothing to buy.
+    ///
+    /// The first real run reported `yes` here, because the rule looked only at
+    /// the tagged arm — this is the assertion that would have caught it.
+    func testCleanControlMeansNothingWasMeasured() {
+        let decision = Kinsoku.decide(
+            tagged: violations(start: 0, end: 0, hardBreak: 30, inspected: 200),
+            untagged: violations(start: 0, end: 0, hardBreak: 30, inspected: 200),
+            contentHeight: 1_000,
+            canvasHeight: 1_000_000
+        )
+        XCTAssertEqual(decision.execution, .inconclusive)
+        XCTAssertNil(decision.finding, "an equally clean control leaves nothing for the tag to buy")
+    }
+
+    func testTagThatRemovesControlViolationsIsAYes() {
+        let decision = Kinsoku.decide(
+            tagged: violations(start: 0, end: 0, hardBreak: 30, inspected: 200),
+            untagged: violations(start: 4, end: 0, hardBreak: 30, inspected: 200),
+            contentHeight: 1_000,
+            canvasHeight: 1_000_000
+        )
+        XCTAssertEqual(decision.execution, .measured)
+        XCTAssertEqual(decision.finding, .yes)
+    }
+
+    func testTagThatLeavesViolationsIsANo() {
+        let decision = Kinsoku.decide(
+            tagged: violations(start: 3, end: 0, hardBreak: 30, inspected: 200),
+            untagged: violations(start: 0, end: 0, hardBreak: 30, inspected: 200),
+            contentHeight: 1_000,
+            canvasHeight: 1_000_000
+        )
+        XCTAssertEqual(decision.execution, .measured)
+        XCTAssertEqual(decision.finding, .no)
+    }
+
+    /// Experiment validity outranks the comparison: a bypassed line-end check or
+    /// a clamped canvas makes the whole sweep unreadable, whatever the arms say.
+    func testBypassedLineEndChecksOutrankTheComparison() {
+        let decision = Kinsoku.decide(
+            tagged: violations(start: 3, end: 0, hardBreak: 30, inspected: 0),
+            untagged: violations(start: 3, end: 0, hardBreak: 30, inspected: 0),
+            contentHeight: 1_000,
+            canvasHeight: 1_000_000
+        )
+        XCTAssertEqual(decision.execution, .inconclusive)
+        XCTAssertNil(decision.finding)
+    }
+
+    func testClampedCanvasOutranksTheComparison() {
+        let canvas = 1_000_000.0
+        let decision = Kinsoku.decide(
+            tagged: violations(start: 0, end: 0, hardBreak: 30, inspected: 200),
+            untagged: violations(start: 5, end: 0, hardBreak: 30, inspected: 200),
+            contentHeight: canvas * Kinsoku.canvasHeadroom,
+            canvasHeight: canvas
+        )
+        XCTAssertEqual(decision.execution, .inconclusive)
+        XCTAssertNil(decision.finding)
+    }
+
+    /// Just inside the headroom is fine; the limit itself is not.
+    func testCanvasHeadroomBoundary() {
+        let canvas = 1_000_000.0
+        func decide(_ contentHeight: Double) -> Kinsoku.Decision {
+            Kinsoku.decide(
+                tagged: violations(start: 0, end: 0, hardBreak: 30, inspected: 200),
+                untagged: violations(start: 1, end: 0, hardBreak: 30, inspected: 200),
+                contentHeight: contentHeight,
+                canvasHeight: canvas
+            )
+        }
+        XCTAssertEqual(decide(canvas * 0.5).execution, .measured)
+        XCTAssertEqual(decide(canvas * 0.89).execution, .measured)
+        XCTAssertEqual(decide(canvas * 0.91).execution, .inconclusive)
+        XCTAssertEqual(decide(canvas).execution, .inconclusive)
+    }
+
+    func testViolationsAccumulate() {
+        var total = violations(start: 1, end: 2, hardBreak: 3, inspected: 4)
+        total.add(violations(start: 10, end: 20, hardBreak: 30, inspected: 40))
+        XCTAssertEqual(total.lineStartsWithProhibited, 11)
+        XCTAssertEqual(total.lineEndsWithProhibited, 22)
+        XCTAssertEqual(total.hardBreakLines, 33)
+        XCTAssertEqual(total.inspectedLineEnds, 44)
+        XCTAssertEqual(total.total, 33)
+    }
+
     // MARK: - Helpers
+
+    private func violations(
+        start: Int,
+        end: Int,
+        hardBreak: Int,
+        inspected: Int
+    ) -> Kinsoku.Violations {
+        Kinsoku.Violations(
+            lineStartsWithProhibited: start,
+            lineEndsWithProhibited: end,
+            hardBreakLines: hardBreak,
+            inspectedLineEnds: inspected
+        )
+    }
 
     private func line(
         _ index: Int,
