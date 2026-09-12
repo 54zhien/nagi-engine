@@ -1,6 +1,33 @@
 # TODO
 
-## 当前任务：Spike A 第二轮 —— 让往返契约回到它真正成立的样子
+## 当前任务：Spike A 第三轮 —— 先冻结测量规则，再扩张测量面
+
+计划全文见 `C:\Users\Azusa\.claude\plans\curious-scribbling-forest.md`。
+**分两次推送、各自读数** —— 合起来推就分不清是哪一半改变了读数。
+
+### 阶段一：harness 修整
+
+- [ ] **先加一个 `#p1` 形态的 locator 用例** —— 否则 href 修复**不可观测**（fixture 里没有任何 href 是规范化变体，改完一行都不变，CI 无从确认）
+- [ ] href：`nativeToLocatorToNative` 那个方向**没有输入 href 可比**（href 是从 unit 导出的）→ 只能 `.recomputed`；**恒真式**（拿 unit 的 href 和它自己比）必须消失；unit 查不到不得伪装成 verdict
+- [ ] `FieldVerdict`：`reproduced` → **`carried`**；新增 **`approximated`**；六项含义写进类型文档
+- [ ] **`exact` ⟺ 每个字段都是 `.carried`**（结构约束，非命名约定）
+- [ ] outcome 拆两个：**`recomputedEquivalent`**（有字段被重算/近似）/ **`semanticEquivalent`**（仅因不可携带而不同）
+- [ ] `compare` 逐行重写：判定输入改为 `Resolution.discarded`（**今天无人读取**）
+- [ ] `main.swift:54` `outcomeLabel` —— 全仓库唯一穷尽 switch，加 case 的编译期绊线
+- [ ] `identityRoundTripProbe` —— 加桶 + **「桶和 == cases」断言**（否则新 case 静默消失）
+- [ ] `IdentityTests.swift` 14 处字段断言 + 5 处 outcome 匹配同步
+- [ ] ADR-0004 / 0009 更新；`SpikeARunner.swift:14-17` 的 `"\n"` join 与 `Document.totalLength` 差 2，两者都要标注
+
+### 阶段二：metric 矩阵
+
+- [ ] `Progression { value, metric }` —— **metric 非可选**，闭合 ADR-0009:73
+- [ ] `ProgressMetricAxis` 协议；**容差由 metric 声明**、只用 metric 单位（progression 空间会被 `Quantize` 洗成精确）
+- [ ] `CanonicalTextIndexAxis` 吸收 `Document.progression(of:)` / `totalProgression(of:)`
+- [ ] fixture：`ByteResource`（续字节 / CRLF / 非法字节，**`legalBoundaries` 手写**）+ 一个 `pageCount` 资源
+- [ ] 四个 probe，每条点名**能把它翻成 `no` 的变异**
+- [ ] `layout-independence` 必须要求 `fixedPageOrdinal` **变**且 `canonicalTextIndex` **不变**
+
+## 已完成：Spike A 第二轮 —— 让往返契约回到它真正成立的样子
 
 计划全文见 `C:\Users\Azusa\.claude\plans\curious-scribbling-forest.md`。
 第一轮读数已出（`945ad92`），但**复核代码后发现第一轮的头条结论引错了地方**。

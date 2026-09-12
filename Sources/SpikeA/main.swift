@@ -54,6 +54,7 @@ func findingLabel(_ finding: ProbeOutcome.Finding?) -> String {
 func outcomeLabel(_ outcome: RoundTripOutcome) -> String {
     switch outcome {
     case .exact: return "exact"
+    case .recomputedEquivalent: return "recomputed"
     case .semanticEquivalent: return "semantic"
     case .loses: return "loses fields"
     case .requiresValidator: return "needs validator"
@@ -119,6 +120,9 @@ do {
     print(line())
     for trip in report.roundTrips {
         print(pad(trip.name, 52) + outcomeLabel(trip.outcome))
+        if case .recomputedEquivalent(let notes) = trip.outcome {
+            for note in notes { print("      · \(note)") }
+        }
         if case .semanticEquivalent(let notes) = trip.outcome {
             for note in notes { print("      · \(note)") }
         }

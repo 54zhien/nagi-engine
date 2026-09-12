@@ -49,6 +49,29 @@ final class IdentityTests: XCTestCase {
         XCTAssertEqual(Href.removingFragment("chap1.xhtml#p1"), "chap1.xhtml")
     }
 
+    /// The semantic href comparison driven all the way through the bridge, not
+    /// asserted on `Href` alone. A fragment on the href names the same
+    /// document; raw `==` at the comparison site would report it `.lost` and
+    /// drop an otherwise perfect row out of `.exact`. Pinning it here means a
+    /// regression has to break a test, not just change a number nobody reads.
+    func testAFragmentSpelledIntoTheHrefStillNamesTheSameUnit() throws {
+        let document = try document()
+        let trip = RoundTripHarness.locatorToNativeToLocator(
+            ReadiumLocator(
+                href: "OEBPS/chap1.xhtml#p1",
+                mediaType: "application/xhtml+xml",
+                locations: .init(fragments: ["p1"])
+            ),
+            in: document,
+            label: "href-spelling"
+        )
+        XCTAssertTrue(
+            trip.fields["href"] == .carried,
+            "a fragment on the href names the same resource, so the comparison has to be semantic"
+        )
+        XCTAssertEqual(trip.outcome, .exact)
+    }
+
     // MARK: - The bridge, Publication Position → Native Position
 
     func testFragmentResolvesStructurally() throws {
@@ -311,7 +334,7 @@ final class IdentityTests: XCTestCase {
             in: document,
             label: "native-mid-paragraph"
         )
-        XCTAssertTrue(trip.fields["nodeID"] == .reproduced, "the paragraph is still named correctly")
+        XCTAssertTrue(trip.fields["nodeID"] == .carried, "the paragraph is still named correctly")
         XCTAssertTrue(trip.fields["utf16Offset"] == .lost, "but the place inside it is not")
     }
 
@@ -325,7 +348,7 @@ final class IdentityTests: XCTestCase {
     /// is exact for every offset this fixture can reach, so the equality was
     /// never capable of failing. Calling it `.exact` would claim a precision the
     /// Progression path does not have — ADR-0009 gives that path a bounded
-    /// tolerance. So both fields are `.recomputed`, not `.reproduced`: equal is
+    /// tolerance. So both fields are `.recomputed`, not `.carried`: equal is
     /// not the same as carried.
     ///
     /// This row had no test at all before, which is how it stayed wrong.
@@ -354,8 +377,12 @@ final class IdentityTests: XCTestCase {
             trip.fields["nodeID"] == .recomputed,
             "the node came back from that same recovered number, so it is implied by the offset rather than confirmed independently"
         )
-        guard case .semanticEquivalent(let notes) = trip.outcome else {
-            return XCTFail("expected a semantic-equivalent verdict, got \(trip.outcome)")
+        // There is no `href` field in this direction at all — see the comment in
+        // `nativeToLocatorToNative`. It used to be reported as `.carried` on the
+        // strength of comparing a unit's href with its own href.
+        XCTAssertNil(trip.fields["href"], "a field that cannot vary must not be reported")
+        guard case .recomputedEquivalent(let notes) = trip.outcome else {
+            return XCTFail("expected a recomputed-equivalent verdict, got \(trip.outcome)")
         }
         XCTAssertTrue(
             notes.contains { $0.contains("progression") },

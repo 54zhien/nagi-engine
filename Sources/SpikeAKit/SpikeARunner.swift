@@ -242,21 +242,38 @@ public enum SpikeA {
             roundTrips.filter { matches($0.outcome) }.count
         }
         let exact = count { if case .exact = $0 { return true }; return false }
+        let recomputed = count { if case .recomputedEquivalent = $0 { return true }; return false }
         let semantic = count { if case .semanticEquivalent = $0 { return true }; return false }
         let loses = count { if case .loses = $0 { return true }; return false }
         let validator = count { if case .requiresValidator = $0 { return true }; return false }
         let reanchor = count { if case .requiresReanchor = $0 { return true }; return false }
         let needingValidator = roundTrips.filter(\.needsValidator).count
 
+        // These buckets are counted with independent predicates and no `switch`,
+        // so the compiler cannot see it when a new `RoundTripOutcome` case is
+        // added and matches none of them. Everywhere else that failure is
+        // silent: the row disappears from the census, no `numbers` key appears,
+        // and not one word of `detail` changes. Only the sum can see it, so the
+        // sum has to be checked. (`main.swift`'s `outcomeLabel` is the
+        // compile-time tripwire; this is the runtime one. Neither is optional.)
+        let counted = exact + recomputed + semantic + loses + validator + reanchor
+        guard counted == roundTrips.count else {
+            throw RoundTripCensusError.bucketsDoNotSum(
+                rows: roundTrips.count,
+                counted: counted
+            )
+        }
+
         return try ProbeOutcome(
             name: "identity-round-trip",
             question: "Which conversions survive a round trip, and which need a validator or a reanchor?",
             execution: roundTrips.isEmpty ? .inconclusive : .measured,
             finding: roundTrips.isEmpty ? nil : .yes,
-            detail: "\(roundTrips.count) cases: \(exact) exact, \(semantic) semantic-equivalent, \(loses) losing fields, \(validator) blocked for another reason, \(reanchor) needing a reanchor. \(needingValidator) of them cannot confirm identity without a validator.",
+            detail: "\(roundTrips.count) cases: \(exact) exact, \(recomputed) recomputed-equivalent, \(semantic) semantic-equivalent, \(loses) losing fields, \(validator) blocked for another reason, \(reanchor) needing a reanchor. \(needingValidator) of them cannot confirm identity without a validator.",
             numbers: [
                 "cases": Double(roundTrips.count),
                 "exact": Double(exact),
+                "recomputedEquivalent": Double(recomputed),
                 "semanticEquivalent": Double(semantic),
                 "losesFields": Double(loses),
                 "requiresValidator": Double(validator),

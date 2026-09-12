@@ -47,6 +47,22 @@ enum SpikeACases {
             locations: .init(fragments: ["p1"])
         )),
 
+        // **The same resource, spelled the way a real producer may well spell
+        // it.** A fragment on the href is a legal way to name the same
+        // document, and `Href.isEquivalent` strips it on its second pass — so
+        // this must resolve to `chap1` and its href must come back `.carried`.
+        //
+        // Without this row the semantic comparison the harness depends on is
+        // never exercised: every other href in the corpus is the canonical
+        // spelling, so reverting `compare` to raw `==` would change no row and
+        // CI could not tell. A fix that changes nothing observable is the same
+        // defect as a row with no test at all.
+        LocatorCase(label: "id-anchored-with-fragment-in-href", locator: ReadiumLocator(
+            href: "OEBPS/chap1.xhtml#p1",
+            mediaType: "application/xhtml+xml",
+            locations: .init(fragments: ["p1"])
+        )),
+
         // The same anchor, in the unit with identical content.
         LocatorCase(label: "id-anchored-in-identical-twin", locator: ReadiumLocator(
             href: "OEBPS/chap2.xhtml",
@@ -177,7 +193,7 @@ enum SpikeACases {
         // fragment to emit, so the position travels as a progression — a
         // channel ADR-0009 rules out for exact recovery. The offset comes back
         // equal, and that equality is arithmetic rather than information, so the
-        // row reports `semanticEquivalent` with both fields `.recomputed`. It
+        // row reports `recomputedEquivalent` with both fields `.recomputed`. It
         // looking like a success is the thing to distrust.
         if let anonymous = chapter1.canonical.elements.first(where: { $0.name == "p" && $0.explicitID == nil }) {
             cases.append(NativeCase(
