@@ -8,13 +8,16 @@ import Foundation
 /// shape its JavaScript really mints (a selector plus an unbounded highlight,
 /// nothing else), and the shapes a stored annotation really has.
 enum SpikeACases {
-    static func all(_ document: Document) -> [RoundTrip] {
-        locatorFirst(document) + nativeFirst(document)
+    /// Throwing because the harness does: a row that produced a position but
+    /// reported no field provenance is a code failure, and `OutcomeReducer`
+    /// refuses to call it `exact`.
+    static func all(_ document: Document) throws -> [RoundTrip] {
+        try locatorFirst(document) + nativeFirst(document)
     }
 
-    static func locatorFirst(_ document: Document) -> [RoundTrip] {
-        locatorCases.map { testCase in
-            RoundTripHarness.locatorToNativeToLocator(
+    static func locatorFirst(_ document: Document) throws -> [RoundTrip] {
+        try locatorCases.map { testCase in
+            try RoundTripHarness.locatorToNativeToLocator(
                 testCase.locator,
                 in: document,
                 label: testCase.label
@@ -22,9 +25,9 @@ enum SpikeACases {
         }
     }
 
-    static func nativeFirst(_ document: Document) -> [RoundTrip] {
-        nativeCases(document).map { testCase in
-            RoundTripHarness.nativeToLocatorToNative(
+    static func nativeFirst(_ document: Document) throws -> [RoundTrip] {
+        try nativeCases(document).map { testCase in
+            try RoundTripHarness.nativeToLocatorToNative(
                 testCase.position,
                 in: document,
                 label: testCase.label

@@ -56,7 +56,7 @@ final class IdentityTests: XCTestCase {
     /// regression has to break a test, not just change a number nobody reads.
     func testAFragmentSpelledIntoTheHrefStillNamesTheSameUnit() throws {
         let document = try document()
-        let trip = RoundTripHarness.locatorToNativeToLocator(
+        let trip = try RoundTripHarness.locatorToNativeToLocator(
             ReadiumLocator(
                 href: "OEBPS/chap1.xhtml#p1",
                 mediaType: "application/xhtml+xml",
@@ -66,7 +66,7 @@ final class IdentityTests: XCTestCase {
             label: "href-spelling"
         )
         XCTAssertTrue(
-            trip.fields["href"] == .carried,
+            trip.provenance(of: .href) == .carried,
             "a fragment on the href names the same resource, so the comparison has to be semantic"
         )
         XCTAssertEqual(trip.outcome, .exact)
@@ -184,7 +184,7 @@ final class IdentityTests: XCTestCase {
             ),
             in: try document()
         )
-        guard case .ambiguous(let candidates, _) = resolution else {
+        guard case .ambiguous(let candidates, _, _) = resolution else {
             return XCTFail("expected ambiguity, got \(resolution)")
         }
         XCTAssertEqual(candidates.count, 2)
@@ -193,7 +193,7 @@ final class IdentityTests: XCTestCase {
     // MARK: - Round trips
 
     func testStructuralAnchorRoundTripsExactly() throws {
-        let trip = RoundTripHarness.locatorToNativeToLocator(
+        let trip = try RoundTripHarness.locatorToNativeToLocator(
             ReadiumLocator(href: "OEBPS/chap1.xhtml", mediaType: "application/xhtml+xml", locations: .init(fragments: ["p1"])),
             in: try document(),
             label: "id-anchored"
@@ -205,7 +205,7 @@ final class IdentityTests: XCTestCase {
     /// The quotation is the part that cannot come back, and it is the reason
     /// `AnchorValidator` exists rather than being optional.
     func testQuotationDoesNotSurviveTheNativePosition() throws {
-        let trip = RoundTripHarness.locatorToNativeToLocator(
+        let trip = try RoundTripHarness.locatorToNativeToLocator(
             ReadiumLocator(
                 href: "OEBPS/chap1.xhtml",
                 mediaType: "application/xhtml+xml",
@@ -218,7 +218,7 @@ final class IdentityTests: XCTestCase {
         // `==` rather than `XCTAssertEqual`: a leading-dot member against a
         // dictionary subscript leaves the generic parameter unresolved, and the
         // compiler reports it as "type 'Equatable' has no member …".
-        XCTAssertTrue(trip.fields["text"] == .notCarriable)
+        XCTAssertTrue(trip.provenance(of: .text) == .notCarriable)
         guard case .semanticEquivalent(let notes) = trip.outcome else {
             return XCTFail("expected semantic equivalence, got \(trip.outcome)")
         }
@@ -227,7 +227,7 @@ final class IdentityTests: XCTestCase {
 
     func testAmbiguousAndUnresolvableCasesNeedAReanchor() throws {
         let document = try document()
-        let ambiguous = RoundTripHarness.locatorToNativeToLocator(
+        let ambiguous = try RoundTripHarness.locatorToNativeToLocator(
             ReadiumLocator(
                 href: "OEBPS/chap1.xhtml",
                 mediaType: "application/xhtml+xml",
@@ -238,7 +238,7 @@ final class IdentityTests: XCTestCase {
         )
         XCTAssertTrue(ambiguous.needsReanchor)
 
-        let missing = RoundTripHarness.locatorToNativeToLocator(
+        let missing = try RoundTripHarness.locatorToNativeToLocator(
             ReadiumLocator(href: "OEBPS/chap1.xhtml", mediaType: "application/xhtml+xml", locations: .init(fragments: ["p99"])),
             in: document,
             label: "fragment-names-nothing"
@@ -252,7 +252,7 @@ final class IdentityTests: XCTestCase {
     /// A locator minted the way Readium's positions service mints them: a
     /// progression, a global position and a totalProgression, no anchor.
     func testPositionsServiceShapedLocatorIsApproximateAndLosesTheGlobalNumbering() throws {
-        let trip = RoundTripHarness.locatorToNativeToLocator(
+        let trip = try RoundTripHarness.locatorToNativeToLocator(
             ReadiumLocator(
                 href: "OEBPS/chap1.xhtml",
                 mediaType: "application/xhtml+xml",
@@ -261,9 +261,9 @@ final class IdentityTests: XCTestCase {
             in: try document(),
             label: "positions-service-shaped"
         )
-        XCTAssertTrue(trip.fields["progression"] == .recomputed)
-        XCTAssertTrue(trip.fields["position"] == .documentLevel)
-        XCTAssertTrue(trip.fields["totalProgression"] == .documentLevel)
+        XCTAssertTrue(trip.provenance(of: .progression)?.isDerived == true)
+        XCTAssertTrue(trip.provenance(of: .position) == .documentLevel)
+        XCTAssertTrue(trip.provenance(of: .totalProgression) == .documentLevel)
     }
 
     /// Native → Publication → Native is the direction a stored position
@@ -272,7 +272,7 @@ final class IdentityTests: XCTestCase {
         let document = try document()
         let unit = try XCTUnwrap(document.unit(withID: "OEBPS/chap1.xhtml"))
         let p1 = try XCTUnwrap(unit.canonical.element(withID: "p1"))
-        let trip = RoundTripHarness.nativeToLocatorToNative(
+        let trip = try RoundTripHarness.nativeToLocatorToNative(
             NativePosition(unitID: unit.id, nodeID: .explicitID("p1"), utf16Offset: p1.utf16Range.lowerBound),
             in: document,
             label: "native-id-anchored"
@@ -305,13 +305,13 @@ final class IdentityTests: XCTestCase {
         let offset = astral.utf16Range.lowerBound + 4
         XCTAssertTrue(unit.canonical.isMidCharacter(offset), "the fixture must still place this inside a character")
 
-        let trip = RoundTripHarness.nativeToLocatorToNative(
+        let trip = try RoundTripHarness.nativeToLocatorToNative(
             NativePosition(unitID: unit.id, nodeID: .explicitID("astral"), utf16Offset: offset),
             in: document,
             label: "native-inside-surrogate-pair"
         )
         XCTAssertTrue(
-            trip.fields["utf16Offset"] == .lost,
+            trip.provenance(of: .utf16Offset) == .lost,
             "a fragment names the element, not an offset within it"
         )
         guard case .loses(let fields) = trip.outcome else {
@@ -329,13 +329,13 @@ final class IdentityTests: XCTestCase {
         let unit = try XCTUnwrap(document.unit(withID: "OEBPS/chap1.xhtml"))
         let p4 = try XCTUnwrap(unit.canonical.element(withID: "p4"))
 
-        let trip = RoundTripHarness.nativeToLocatorToNative(
+        let trip = try RoundTripHarness.nativeToLocatorToNative(
             NativePosition(unitID: unit.id, nodeID: .explicitID("p4"), utf16Offset: p4.utf16Range.lowerBound + 5),
             in: document,
             label: "native-mid-paragraph"
         )
-        XCTAssertTrue(trip.fields["nodeID"] == .carried, "the paragraph is still named correctly")
-        XCTAssertTrue(trip.fields["utf16Offset"] == .lost, "but the place inside it is not")
+        XCTAssertTrue(trip.provenance(of: .nodeID) == .carried, "the paragraph is still named correctly")
+        XCTAssertTrue(trip.provenance(of: .utf16Offset) == .lost, "but the place inside it is not")
     }
 
     /// The counterpart of the two above, and the reason neither of them is the
@@ -361,7 +361,7 @@ final class IdentityTests: XCTestCase {
         )
         let offset = anonymous.utf16Range.lowerBound + 1
 
-        let trip = RoundTripHarness.nativeToLocatorToNative(
+        let trip = try RoundTripHarness.nativeToLocatorToNative(
             NativePosition(unitID: unit.id, nodeID: .path(anonymous.path), utf16Offset: offset),
             in: document,
             label: "native-path-anchored"
@@ -370,17 +370,17 @@ final class IdentityTests: XCTestCase {
         // The numbers agree — which is precisely why this case is the dangerous
         // one, and why the verdict has to be about provenance instead.
         XCTAssertTrue(
-            trip.fields["utf16Offset"] == .recomputed,
+            trip.provenance(of: .utf16Offset)?.isDerived == true,
             "equal, but rebuilt from a fraction rather than carried"
         )
         XCTAssertTrue(
-            trip.fields["nodeID"] == .recomputed,
+            trip.provenance(of: .nodeID)?.isDerived == true,
             "the node came back from that same recovered number, so it is implied by the offset rather than confirmed independently"
         )
         // There is no `href` field in this direction at all — see the comment in
         // `nativeToLocatorToNative`. It used to be reported as `.carried` on the
         // strength of comparing a unit's href with its own href.
-        XCTAssertNil(trip.fields["href"], "a field that cannot vary must not be reported")
+        XCTAssertNil(trip.resolution(of: .href), "a field that cannot vary must not be reported")
         guard case .recomputedEquivalent(let notes) = trip.outcome else {
             return XCTFail("expected a recomputed-equivalent verdict, got \(trip.outcome)")
         }
@@ -401,7 +401,7 @@ final class IdentityTests: XCTestCase {
             unit.canonical.elements.first { $0.name == "p" && $0.explicitID == nil }
         )
 
-        let trip = RoundTripHarness.nativeToLocatorToNative(
+        let trip = try RoundTripHarness.nativeToLocatorToNative(
             NativePosition(
                 unitID: unit.id,
                 nodeID: .path(anonymous.path),
@@ -410,9 +410,25 @@ final class IdentityTests: XCTestCase {
             in: document,
             label: "native-path-anchored"
         )
-        XCTAssertEqual(trip.derivedFrom, "progression")
-        XCTAssertTrue(trip.discarded.contains("progression"), "what the bridge could not carry in")
-        XCTAssertTrue(trip.discarded.contains("progression.metric"), "what the mirror had no room for")
+        // The channel is now a property of the field rather than of the row, so
+        // it says which field came back that way — and with what guarantee.
+        // `==` rather than `XCTAssertEqual`: an optional on the left and a
+        // leading-dot member on the right leaves the generic parameter
+        // unresolved, and the compiler reports it as "type 'Equatable' has no
+        // member …". `tasks/lessons.md` records this being forgotten once
+        // already in this package.
+        let expectedBound = Bound(
+            tolerance: CanonicalTextIndexAxis(document: document).seekTolerance,
+            unit: .canonicalTextIndex
+        )
+        XCTAssertTrue(
+            trip.provenance(of: .utf16Offset) == .recomputed(basis: "progression", bound: expectedBound)
+        )
+        XCTAssertEqual(trip.provenance(of: .nodeID)?.isDerived, true)
+        XCTAssertTrue(
+            trip.provenance(of: .progressionMetric) == .discarded(reason: .metricHasNowhereToGo),
+            "the mirror's bare Double is where the metric label goes"
+        )
     }
 
     /// **The number written into `locations.progression` is per resource, and
@@ -454,7 +470,10 @@ final class IdentityTests: XCTestCase {
         )
 
         XCTAssertTrue(
-            exported.discarded.contains("progression.metric"),
+            exported.provenance.contains {
+                $0.field == .progressionMetric
+                    && $0.provenance == .discarded(reason: .metricHasNowhereToGo)
+            },
             "the label cannot come along, so the drop has to be recorded"
         )
     }

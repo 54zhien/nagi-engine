@@ -1,50 +1,14 @@
 import Foundation
 
-/// What a conversion did to a locator's information.
-///
-/// **Provenance, not equality.** These are not a scale from good to bad, and
-/// the first three are not distinguished by whether the value came back the
-/// same. They answer one question: *did the original information travel, or was
-/// it rebuilt at the far end?* A value can arrive identical and still not have
-/// travelled — see `recomputed`.
-///
-/// This distinction is the whole reason the harness exists. It was learned the
-/// hard way: an offset recovered by inverting `progression` comes back *exactly*
-/// right for every offset a fixture can reach, because `round(o/L × L) == o`
-/// holds in IEEE-754. An equality that cannot fail can never be evidence, and
-/// it never announces itself. Any future metric must be judged by this table
-/// before it is judged by its numbers.
-public enum FieldVerdict: String, Sendable, Hashable, Codable {
-    /// The locator **carried** this value across the round trip. It travelled.
-    case carried
-    /// The locator did **not** carry it; the bridge re-derived it at the far
-    /// end. It may happen to equal the original — an offset recovered from a
-    /// progression does — and that equality is arithmetic, not a copy.
-    case recomputed
-    /// Recoverable only within a **declared tolerance**, in the metric's own
-    /// units. Distinct from `recomputed`, which is exact-by-re-derivation:
-    /// this one is honest about not landing on the same place.
-    case approximated
-    /// The intermediate representation has nowhere to put it. Not a bug:
-    /// a coordinate cannot carry a quotation.
-    case notCarriable
-    /// Belongs to the publication rather than the position, so it returns only
-    /// when the positions table does.
-    case documentLevel
-    /// Dropped, and it should not have been.
-    case lost
-}
-
 public enum RoundTripOutcome: Sendable, Hashable, Codable {
     /// Every field came back `.carried`. This is a structural rule, not a
     /// three-condition test: `exact` is reachable only when *no* field is
-    /// recomputed, approximated or lost. That makes the false positive of round
-    /// two impossible rather than merely unlikely.
+    /// recomputed or lost. That makes the false positive of round two
+    /// impossible rather than merely unlikely.
     case exact
-    /// Same place, but at least one field was **re-derived** (`recomputed`) or
-    /// recovered only within a tolerance (`approximated`). The numbers on such a
-    /// row may all be equal to the originals. Say so here anyway: nothing on
-    /// this row travelled, so nothing here is identity preservation.
+    /// Same place, but at least one field was **re-derived**. The numbers on
+    /// such a row may all be equal to the originals. Say so here anyway:
+    /// nothing on this row travelled, so nothing here is identity preservation.
     case recomputedEquivalent(notes: [String])
     /// Same place, and nothing was re-derived — the differences are fields this
     /// representation has nowhere to put (`notCarriable` / `documentLevel`).
@@ -79,16 +43,15 @@ public enum RoundTripCensusError: Error, CustomStringConvertible {
 public struct RoundTrip: Sendable, Hashable, Codable {
     public var name: String
     public var outcome: RoundTripOutcome
-    /// Per-field verdicts, so a reader can see *which* information was
-    /// **carried** rather than only whether the whole thing arrived.
+    /// **The report's field table.** One row per field the input stated, saying
+    /// what it said, what came back, and what happened in between.
     ///
-    /// "Carried" is the operative word and it is not a synonym for "equal". A
-    /// value that arrives identical because the bridge recomputed it at the far
-    /// end did not survive the trip — it was rebuilt there, from something else.
-    /// Both directions of this harness read this dictionary; they used to read
-    /// it differently, which is the whole reason one of them could call a
-    /// re-derived offset `.carried`.
-    public var fields: [String: FieldVerdict]
+    /// The two values are for a human reader. **Nothing derives a verdict from
+    /// them** — `OutcomeReducer` receives only `provenance`, which is a type
+    /// that has nowhere to put a value. "This code cannot compare before against
+    /// after" is therefore a property of the types rather than a rule a future
+    /// reader has to remember.
+    public var resolutions: [FieldResolution]
     /// Every conversion through a Native Position needs a validator, and the
     /// reason says which of two situations it is in: the quote was dropped on
     /// the way, or there was never a quote and identity rests on structure alone.
@@ -97,25 +60,32 @@ public struct RoundTrip: Sendable, Hashable, Codable {
     /// Set when the conversion could not be made structurally at all.
     public var needsReanchor: Bool
     public var reanchorReason: String?
-    /// Every name this row's information was dropped under, from **both**
-    /// directions: what `LocationBridge.native(from:)` could not carry in
-    /// (`Resolution.discarded`), and what `LocationBridge.locator(from:)` had to
-    /// drop to fit the mirror.
-    ///
-    /// Until this round that first array was not merely unread — it was
-    /// **pattern-discarded at its only call site**, `if case .approximate(_,
-    /// let basis, _)`, with the third binding a bare `_`. A value nobody reads
-    /// is a value nobody can be wrong about; this is where it starts being read.
-    public var discarded: [String]
-    /// The channel the position was **derived** from rather than carried —
-    /// `Resolution.approximate`'s basis. Nil when nothing was derived.
-    ///
-    /// **Not a premise for a verdict.** It comes from the same expression
-    /// `carried` is computed from, so `derivedFrom != nil ⟹ some field is not
-    /// .carried` is true by construction and can never be evidence of anything.
-    /// Anything checking that invariant has to ask a question this value cannot
-    /// answer — see `ProgressProbes.provenanceHonesty`.
-    public var derivedFrom: String?
+
+    public init(
+        name: String,
+        outcome: RoundTripOutcome,
+        resolutions: [FieldResolution],
+        needsValidator: Bool,
+        validatorReason: String?,
+        needsReanchor: Bool,
+        reanchorReason: String?
+    ) {
+        self.name = name
+        self.outcome = outcome
+        self.resolutions = resolutions
+        self.needsValidator = needsValidator
+        self.validatorReason = validatorReason
+        self.needsReanchor = needsReanchor
+        self.reanchorReason = reanchorReason
+    }
+
+    public func resolution(of field: LocatorField) -> FieldResolution? {
+        resolutions.first { $0.field == field }
+    }
+
+    public func provenance(of field: LocatorField) -> Provenance? {
+        resolution(of: field)?.provenance
+    }
 }
 
 public enum RoundTripHarness {
@@ -126,61 +96,42 @@ public enum RoundTripHarness {
         _ locator: ReadiumLocator,
         in document: Document,
         label: String
-    ) -> RoundTrip {
+    ) throws -> RoundTrip {
         let name = "\(label) locator->native->locator"
         let resolution = LocationBridge.native(from: locator, in: document)
 
-        switch resolution {
-        case .unresolvable(let reason, _):
-            return RoundTrip(
+        guard let position = resolution.position else {
+            return try refused(
                 name: name,
-                outcome: .requiresReanchor(reason: reason),
-                fields: [:],
-                needsValidator: true,
-                validatorReason: "nothing was resolved, so nothing can be confirmed",
-                needsReanchor: true,
-                reanchorReason: reason,
-                discarded: resolution.discarded,
-                derivedFrom: nil
-            )
-
-        case .ambiguous(let candidates, _):
-            let reason = "the locator's information admits \(candidates.count) positions; choosing between them needs quote matching, which is ReanchorService's job"
-            return RoundTrip(
-                name: name,
-                outcome: .requiresReanchor(reason: reason),
-                fields: ["ambiguousCandidates": .lost],
-                needsValidator: true,
-                validatorReason: "no single position was chosen",
-                needsReanchor: true,
-                reanchorReason: reason,
-                discarded: resolution.discarded,
-                derivedFrom: nil
-            )
-
-        case .structural(let position, _), .approximate(let position, _, _):
-            guard let exported = LocationBridge.locator(from: position, in: document) else {
-                let reason = "the native position \(position.nodeID.described) names a unit the locator side cannot express"
-                return RoundTrip(
-                    name: name,
-                    outcome: .requiresValidator(reason: reason),
-                    fields: [:],
-                    needsValidator: true,
-                    validatorReason: reason,
-                    needsReanchor: false,
-                    reanchorReason: nil,
-                    discarded: resolution.discarded,
-                    derivedFrom: nil
-                )
-            }
-            return compare(
-                original: locator,
-                regenerated: exported.locator,
-                basis: resolution,
-                exportDiscarded: exported.discarded,
-                name: name
+                resolution: resolution,
+                shape: resolution.shape,
+                validatorReason: "nothing was resolved, so nothing can be confirmed"
             )
         }
+        guard let exported = LocationBridge.locator(from: position, in: document) else {
+            return try refused(
+                name: name,
+                resolution: resolution,
+                shape: .notExpressible,
+                validatorReason: "the native position \(position.nodeID.described) names a unit the locator side cannot express"
+            )
+        }
+
+        // **The input's own fields, and nothing else.** The export contributes
+        // only the metric label it had to drop. Reporting the fields the export
+        // wrote would put a `.recomputed` progression on every `id-anchored`
+        // row — a field the input never stated, with a verdict invented for it.
+        var table = resolution.provenance
+        table.append(contentsOf: exported.provenance.filter { $0.field == .progressionMetric })
+
+        return try finish(
+            name: name,
+            table: table,
+            shape: resolution.shape,
+            refusalReason: resolution.refusalReason,
+            original: { field in describe(locator: locator, field: field) },
+            resolved: { field in describe(locator: exported.locator, field: field) }
+        )
     }
 
     /// Native Position → Publication Position → Native Position.
@@ -191,214 +142,166 @@ public enum RoundTripHarness {
         _ position: NativePosition,
         in document: Document,
         label: String
-    ) -> RoundTrip {
+    ) throws -> RoundTrip {
         let name = "\(label) native->locator->native"
         guard let exported = LocationBridge.locator(from: position, in: document) else {
-            return RoundTrip(
+            return try refused(
                 name: name,
-                outcome: .requiresValidator(reason: "the native position names no unit in this document"),
-                fields: [:],
-                needsValidator: true,
-                validatorReason: "the position could not be expressed at all",
-                needsReanchor: false,
-                reanchorReason: nil,
-                discarded: [],
-                derivedFrom: nil
-            )
-        }
-        let locator = exported.locator
-
-        let resolution = LocationBridge.native(from: locator, in: document)
-        guard let recovered = resolution.position else {
-            let reason = "the regenerated locator does not resolve back"
-            return RoundTrip(
-                name: name,
-                outcome: .requiresReanchor(reason: reason),
-                fields: [:],
-                needsValidator: true,
-                validatorReason: reason,
-                needsReanchor: true,
-                reanchorReason: reason,
-                discarded: resolution.discarded + exported.discarded,
-                derivedFrom: nil
+                resolution: nil,
+                shape: .notExpressible,
+                validatorReason: "the position could not be expressed at all"
             )
         }
 
-        // Did the offset come back *carried*, or was it *rebuilt* at this end?
-        //
-        // `Resolution.approximate` is exactly the rebuilt case, and says so
-        // itself: "the offset is this bridge's arithmetic rather than anything
-        // the locator stated" (`LocationBridge.swift:15-18`). Keyed on the case
-        // and not on the basis string, so that "progression (clamped)" — which
-        // is reachable — cannot slip past a text comparison.
-        //
-        // (`basis: "text.highlight"` is unreachable in this direction:
-        // `locator(from:)` never emits a quotation and `native(from:)` requires
-        // a non-empty one. Its offset would be an element's range rather than a
-        // number — a different reason for the same verdict.)
-        var derivedBasis: String?
-        if case .approximate(_, let basis, _) = resolution { derivedBasis = basis }
-        let carried = derivedBasis == nil
-
-        var fields: [String: FieldVerdict] = [:]
-        // **No `href` field here, on purpose.** There is no input href on this
-        // side to judge: the locator was built by `locator(from:)` with
-        // `href: unit.href`, so the old code looked that same unit up by the
-        // same id and compared its href with its own href — a tautology that
-        // always reported "carried". Worse, when the unit failed to resolve,
-        // `nil == "…"` is false, so a *missing unit* was being reported as a
-        // spelling difference.
-        //
-        // A field that cannot vary carries no information, so reporting one is
-        // the defect — not the verdict chosen for it. Whether the right unit
-        // came back is `unitID`'s question, and it is asked below.
-        let unitIDMatches = recovered.unitID == position.unitID
-        let nodeIDMatches = recovered.nodeID == position.nodeID
-        let offsetMatches = recovered.utf16Offset == position.utf16Offset
-        fields["unitID"] = unitIDMatches ? .carried : .lost
-        // Under a derived resolution the node is recovered by
-        // `innermostElement(containing:)` and the offset by inverting a
-        // fraction — both functions of the same number. So `nodeIDMatches` is
-        // *implied by* `offsetMatches` rather than independent evidence of it,
-        // and `.carried` on either would report a tautology as a surviving
-        // fact. Equal is not the same as carried.
-        fields["nodeID"] = (nodeIDMatches && carried) ? .carried : .recomputed
-
-        // Three outcomes for the offset, not two: it can arrive *equal because
-        // it was recomputed*, which is neither `.carried` (nothing carried it)
-        // nor `.lost` (nothing was dropped — the number is exactly right).
-        let offsetVerdict: FieldVerdict
-        if !offsetMatches {
-            offsetVerdict = .lost
-        } else if carried {
-            offsetVerdict = .carried
-        } else {
-            offsetVerdict = .recomputed
+        let resolution = LocationBridge.native(from: exported.locator, in: document)
+        guard resolution.position != nil else {
+            return try refused(
+                name: name,
+                resolution: resolution,
+                shape: resolution.shape,
+                validatorReason: "the regenerated locator does not resolve back"
+            )
         }
-        fields["utf16Offset"] = offsetVerdict
 
-        var derivedNotes: [String] = []
-        if let basis = derivedBasis {
-            derivedNotes = [
-                "the offset came back numerically equal, but it was recomputed and not carried: the locator named no position inside the unit, so the bridge inverted \(basis) to obtain one",
-                "an equal number is not evidence here — \(basis) is a fraction whose metric the locator does not state, and ADR-0009 lays the progression round trip down as a bounded tolerance rather than an exactness guarantee. The inversion is exact for every offset this fixture can reach, so this equality could never have failed",
-                "the resolution itself lists \(basis) as discarded, so what survived was not anything the locator stated"
-            ]
+        // The export states `unitID` and — when it wrote a fragment — the fate of
+        // `utf16Offset` and `nodeID`, because there the comparison is a fact
+        // about what it emitted. A position that travelled as a fraction states
+        // neither: only the read-back resolution knows what it was derived from,
+        // and it says so with its basis.
+        var table = exported.provenance.filter { $0.field != .progressionMetric }
+        let statedOffset = table.contains { $0.field == .utf16Offset }
+        if !statedOffset {
+            let basis = resolution.basis ?? "an unnamed channel"
+            // Appended in `LocatorField.allCases` order — `nodeID` before
+            // `utf16Offset` — so both directions report their fields the same
+            // way and a reader diffing the artifact does not see one direction
+            // out of order for no stated reason.
+            table.append(FieldProvenance(
+                field: .nodeID,
+                provenance: .recomputed(basis: basis, bound: nil)
+            ))
+            table.append(FieldProvenance(
+                field: .utf16Offset,
+                provenance: .recomputed(basis: basis, bound: resolution.bound)
+            ))
         }
-        var semanticNotes: [String] = []
-        if !nodeIDMatches {
-            semanticNotes = [
-                "the node identity came back as \(recovered.nodeID.described) instead of \(position.nodeID.described) at the same offset"
-            ]
+        if let metric = exported.provenance.first(where: { $0.field == .progressionMetric }) {
+            table.append(metric)
         }
-        let outcome = classify(fields: fields, derivedNotes: derivedNotes, semanticNotes: semanticNotes)
 
-        return RoundTrip(
+        return try finish(
             name: name,
-            outcome: outcome,
-            fields: fields,
-            needsValidator: true,
-            validatorReason: "the position carries no quotation, so only a validator can confirm the offset still lands on the same content",
-            needsReanchor: false,
-            reanchorReason: nil,
-            discarded: resolution.discarded + exported.discarded,
-            derivedFrom: derivedBasis
+            table: table,
+            shape: resolution.shape,
+            refusalReason: resolution.refusalReason,
+            original: { field in describe(position: position, field: field) },
+            resolved: { field in
+                guard let recovered = resolution.position else { return nil }
+                return describe(position: recovered, field: field)
+            }
         )
     }
 
-    // MARK: - Classification
+    // MARK: - Assembly
 
-    /// **The one place a row's outcome is decided.** Both directions route
-    /// through here so they cannot drift apart again — which is exactly how the
-    /// round-two false positive arose: one direction read `fields` as
-    /// provenance, the other as value-equality, and nothing forced them to
-    /// agree.
-    ///
-    /// The rule is structural, not a tally: `exact` is reachable only when
-    /// *every* field is `.carried`. A single `.recomputed` field is enough to
-    /// demote the row, which makes "equal therefore exact" unreachable by
-    /// construction rather than by convention.
-    ///
-    /// Note the order: a derived field outranks a merely un-carryable one. A row
-    /// that both dropped a quotation and rebuilt an offset is reported as
-    /// `recomputedEquivalent`, because that is the stronger claim about what
-    /// happened to it.
-    private static func classify(
-        fields: [String: FieldVerdict],
-        derivedNotes: [String],
-        semanticNotes: [String]
-    ) -> RoundTripOutcome {
-        let lost = fields.filter { $0.value == .lost }.keys.sorted()
-        if !lost.isEmpty { return .loses(fields: lost) }
-
-        let derived = fields.filter { $0.value == .recomputed || $0.value == .approximated }
-        if !derived.isEmpty { return .recomputedEquivalent(notes: derivedNotes) }
-
-        let notCarried = fields.filter { $0.value == .notCarriable || $0.value == .documentLevel }
-        if !notCarried.isEmpty { return .semanticEquivalent(notes: semanticNotes) }
-
-        return .exact
-    }
-
-    // MARK: - Field comparison
-
-    private static func compare(
-        original: ReadiumLocator,
-        regenerated: ReadiumLocator,
-        basis: Resolution,
-        exportDiscarded: [String],
-        name: String
-    ) -> RoundTrip {
-        var fields: [String: FieldVerdict] = [:]
-
-        fields["href"] = Href.isEquivalent(original.href, regenerated.href) ? .carried : .lost
-        fields["mediaType"] = original.mediaType == regenerated.mediaType ? .carried : .recomputed
-        fields["title"] = original.title == nil ? .carried : .notCarriable
-        fields["fragments"] = original.locations.fragments == regenerated.locations.fragments
-            ? .carried
-            : (regenerated.locations.fragments.isEmpty ? .lost : .recomputed)
-        if original.locations.progression != nil {
-            // Always `recomputed`, even when the two numbers agree: the value is
-            // derived from the offset rather than carried, so an equal number is
-            // a coincidence of the arithmetic and not a copy.
-            fields["progression"] = .recomputed
-        }
-        if original.locations.totalProgression != nil { fields["totalProgression"] = .documentLevel }
-        if original.locations.position != nil { fields["position"] = .documentLevel }
-        if !original.locations.otherLocations.isEmpty { fields["otherLocations"] = .notCarriable }
-        if !original.text.isEmpty { fields["text"] = .notCarriable }
-
-        var derivedNotes: [String] = []
-        var derivedBasis: String?
-        if case .approximate(_, let basisName, _) = basis {
-            derivedBasis = basisName
-            derivedNotes.append("the position was derived from \(basisName), so its offset is this bridge's arithmetic rather than a stated coordinate")
-        }
-        var semanticNotes: [String] = []
-        if fields["text"] == .notCarriable {
-            semanticNotes.append("the quotation did not come back — a Native Position has nowhere to keep it")
-        }
-        if fields["otherLocations"] == .notCarriable {
-            semanticNotes.append("cssSelector / partialCfi / domRange did not come back")
-        }
-        if fields["position"] == .documentLevel || fields["totalProgression"] == .documentLevel {
-            semanticNotes.append("the global position numbering belongs to the publication, not to the coordinate")
-        }
-        let outcome = classify(fields: fields, derivedNotes: derivedNotes, semanticNotes: semanticNotes)
-
-        let hadQuote = !original.text.isEmpty
+    /// A conversion that produced no position. Its outcome is the shape's, but
+    /// its field table is not empty: everything the locator stated and a
+    /// coordinate cannot hold was still dropped, and a refusal that reported
+    /// nothing lost is how this round started.
+    private static func refused(
+        name: String,
+        resolution: Resolution?,
+        shape: ResolutionShape,
+        validatorReason: String
+    ) throws -> RoundTrip {
+        let table = resolution?.provenance ?? []
+        let outcome = try OutcomeReducer.reduce(
+            table,
+            shape: shape,
+            refusalReason: resolution?.refusalReason ?? validatorReason,
+            row: name
+        )
+        let needsReanchor = !shape.producedAPosition && shape != .notExpressible
         return RoundTrip(
             name: name,
             outcome: outcome,
-            fields: fields,
+            resolutions: resolutions(from: table, original: { _ in nil }, resolved: { _ in nil }),
             needsValidator: true,
-            validatorReason: hadQuote
+            validatorReason: validatorReason,
+            needsReanchor: needsReanchor,
+            reanchorReason: needsReanchor ? (resolution?.refusalReason ?? validatorReason) : nil
+        )
+    }
+
+    private static func finish(
+        name: String,
+        table: [FieldProvenance],
+        shape: ResolutionShape,
+        refusalReason: String?,
+        original: (LocatorField) -> String?,
+        resolved: (LocatorField) -> String?
+    ) throws -> RoundTrip {
+        let outcome = try OutcomeReducer.reduce(
+            table,
+            shape: shape,
+            refusalReason: refusalReason,
+            row: name
+        )
+        let carriedAQuote = table.contains { $0.field == .text && $0.provenance == .notCarriable }
+        return RoundTrip(
+            name: name,
+            outcome: outcome,
+            resolutions: resolutions(from: table, original: original, resolved: resolved),
+            needsValidator: true,
+            validatorReason: carriedAQuote
                 ? "the locator carried a quotation and the result does not, so nothing in it can confirm the position still names the same content"
                 : "the locator carried no quotation, so identity rested on structure alone and there is nothing to check it against",
             needsReanchor: false,
-            reanchorReason: nil,
-            discarded: basis.discarded + exportDiscarded,
-            derivedFrom: derivedBasis
+            reanchorReason: nil
         )
+    }
+
+    private static func resolutions(
+        from table: [FieldProvenance],
+        original: (LocatorField) -> String?,
+        resolved: (LocatorField) -> String?
+    ) -> [FieldResolution] {
+        table.map { entry in
+            FieldResolution(
+                field: entry.field,
+                original: original(entry.field),
+                resolved: resolved(entry.field),
+                provenance: entry.provenance
+            )
+        }
+    }
+
+    // MARK: - Rendering the two values
+
+    private static func describe(locator: ReadiumLocator, field: LocatorField) -> String? {
+        switch field {
+        case .href: return locator.href
+        case .title: return locator.title
+        case .fragments: return locator.locations.fragments.isEmpty ? nil : locator.locations.fragments.joined(separator: " ")
+        case .cssSelector: return locator.locations.cssSelector
+        case .progression: return locator.locations.progression.map { String(format: "%.6f", $0) }
+        case .totalProgression: return locator.locations.totalProgression.map { String(format: "%.6f", $0) }
+        case .position: return locator.locations.position.map(String.init)
+        case .otherLocations:
+            let keys = locator.locations.otherLocations.keys.filter { $0 != "cssSelector" }.sorted()
+            return keys.isEmpty ? nil : keys.joined(separator: " ")
+        case .text: return locator.text.isEmpty ? nil : locator.text.highlight
+        case .unitID, .nodeID, .utf16Offset, .progressionMetric: return nil
+        }
+    }
+
+    private static func describe(position: NativePosition, field: LocatorField) -> String? {
+        switch field {
+        case .unitID: return position.unitID
+        case .nodeID: return position.nodeID.described
+        case .utf16Offset: return String(position.utf16Offset)
+        case .progressionMetric: return nil
+        default: return nil
+        }
     }
 }

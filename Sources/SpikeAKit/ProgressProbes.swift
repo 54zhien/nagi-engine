@@ -64,6 +64,35 @@ enum ProgressProbes {
         return String(format: "%.6f", value)
     }
 
+    /// Names a refusal, **with no `default` branch on purpose**.
+    ///
+    /// The exhaustiveness is the tripwire: a new `DiscardReason` fails to
+    /// compile here, where a list of accepted words would have let it through
+    /// silently. That is a stronger check than the runtime white-list this
+    /// replaces, and it cannot be true by construction.
+    private static func explain(_ reason: DiscardReason) -> String {
+        switch reason {
+        case .hrefMatchesNoUnit:
+            return "the href named nothing; another field is what found the unit"
+        case .fragmentNamesNothing:
+            return "a fragment that names nothing is a broken anchor, not something to fall through from"
+        case .selectorNotUnderstood:
+            return "a selector richer than #id is refused rather than guessed at"
+        case .selectorNamesNothing:
+            return "the selector named no element"
+        case .unitCarriesNoText:
+            return "the unit carries no text, so a fraction has nothing to point into"
+        case .unitHasNoAddressableElements:
+            return "the unit has no elements a position could name"
+        case .globalPositionNeedsThePositionsTable:
+            return "a global position needs the publication's positions table, which a coordinate cannot hold"
+        case .nothingResolvable:
+            return "the locator carried nothing this bridge can resolve"
+        case .metricHasNowhereToGo:
+            return "the mirror's progression field is a bare Double, so the metric label cannot come along"
+        }
+    }
+
     // MARK: - 1. Monotonicity
 
     /// ADR-0009 property 1, over a sweep that crosses every unit boundary and
@@ -155,16 +184,22 @@ enum ProgressProbes {
         // fixture that stopped carrying an empty unit would report `0 == 0` and
         // pass — a `yes` built from nothing, which is the one thing this file
         // says it will not do.
-        let clean = missing == 0 && nonFinite == 0 && descending == 0
-            && startMismatches == 0 && emptyUnits > 0 && emptyUnitTies == emptyUnits
-            && emptyProgression == nil
-        let decided = emptyUnits > 0
+        // The discriminating arm for the empty-unit half is the empty unit
+        // itself: with none in the corpus there is nothing to be right or wrong
+        // about, and `0 == 0` would pass. Everything else is a violation.
+        let violations = (missing + nonFinite + descending + startMismatches)
+            + (emptyUnitTies == emptyUnits ? 0 : 1)
+            + (emptyProgression == nil ? 0 : 1)
+        let (execution, finding) = ProbeEvidence.conclude(
+            observed: emptyUnits,
+            violations: violations
+        )
 
         return try ProbeOutcome(
             name: "progress-monotonicity",
             question: "Is publication progress monotone across unit boundaries, including a unit with no text at all?",
-            execution: decided ? .measured : .inconclusive,
-            finding: decided ? (clean ? .yes : .no) : nil,
+            execution: execution,
+            finding: finding,
             detail: """
             \(sweep.count) positions over \(document.readingOrder.count) units: \
             \(descending) descending step(s), \(missing) with no coordinate, \(nonFinite) non-finite, \
@@ -469,9 +504,9 @@ enum ProgressProbes {
     /// hold it — a fragment naming an element that starts exactly there, or one
     /// of the two field classes ADR-0009 names as offset-capable. The check runs
     /// against `Document` and the emitted locator, **never against `Resolution`**,
-    /// which is the only reason it is not a tautology: the row's own
-    /// `derivedFrom` is computed from the same expression as its `carried`, so
-    /// `derivedFrom != nil ⟹ not carried` would be true for every possible input.
+    /// which is the only reason it is not a tautology: a premise taken from the
+    /// row's own provenance would be true by construction, since the verdicts
+    /// and the premises come from the same statements.
     /// The round-two defect — `carried` decided by comparing a basis *string*,
     /// which reported `native-path-anchored` as `.exact` — is exactly what this
     /// fires on: that row's locator has no fragment at all.
@@ -490,9 +525,9 @@ enum ProgressProbes {
     /// weaker than the outcome census in `identityRoundTripProbe` — a count of
     /// names cannot partition rows — and it is not dressed up as one.
     static func provenanceHonesty(_ document: Document) throws -> ProbeOutcome {
-        let roundTrips = SpikeACases.all(document)
+        let roundTrips = try SpikeACases.all(document)
         let nativeCases = SpikeACases.nativeCases(document)
-        let nativeTrips = SpikeACases.nativeFirst(document)
+        let nativeTrips = try SpikeACases.nativeFirst(document)
 
         // ---- (a) the label is written down when it is dropped ----
         let publicationAxis = CanonicalTextIndexAxis(document: document)
@@ -509,7 +544,11 @@ enum ProgressProbes {
                   let written = exported.locator.locations.progression
             else { continue }
             progressionRows += 1
-            if !exported.discarded.contains("progression.metric") { unrecordedMetric += 1 }
+            let recorded = exported.provenance.contains {
+                $0.field == .progressionMetric
+                    && $0.provenance == .discarded(reason: .metricHasNowhereToGo)
+            }
+            if !recorded { unrecordedMetric += 1 }
             guard let unit = document.unit(withID: testCase.position.unitID) else { continue }
             let perUnit = Double(testCase.position.utf16Offset) / Double(unit.length)
             let atPublicationLevel = publicationAxis.progression(of: testCase.position)?.value
@@ -521,7 +560,7 @@ enum ProgressProbes {
             // one where the two candidate numbers tell the story: the row whose
             // offset was rebuilt from a fraction is the row where writing the
             // wrong one is invisible.
-            if writtenExample == nil || trip.derivedFrom != nil {
+            if writtenExample == nil || trip.provenance(of: .utf16Offset)?.isDerived == true {
                 writtenExample = written
                 perUnitExample = perUnit
                 publicationExample = atPublicationLevel
@@ -534,7 +573,7 @@ enum ProgressProbes {
         var uncarriedRows = 0
 
         for (testCase, trip) in zip(nativeCases, nativeTrips) {
-            guard trip.fields["utf16Offset"] == .carried else {
+            guard trip.provenance(of: .utf16Offset) == .carried else {
                 uncarriedRows += 1
                 continue
             }
@@ -557,46 +596,41 @@ enum ProgressProbes {
             if !namedByAFragment && !carriesAnOffsetField { unbacked += 1 }
         }
 
-        // ---- (c) every dropped name is one the harness can explain ----
+        // ---- (c) every refusal is one the harness can name ----
         //
-        // This list is the point of the tripwire, not a formality: adding
-        // `"fragments"` to the bridge's discard list in this same round is
-        // exactly the change that would have made this probe report `no` with a
-        // word nobody had defined.
-        let explainable: Set<String> = [
-            "title", "text", "href", "fragments", "cssSelector",
-            "progression", "position", "progression.metric"
-        ]
-        var discardedNames = 0
-        var unexplained: [String] = []
+        // The tripwire is the **exhaustive switch**, not a list of accepted
+        // words. A `Set(DiscardReason.allCases)` would be true by construction
+        // and would prove nothing — the zero-coverage failure this probe exists
+        // to catch, wearing the probe's own clothes. A new reason is a compile
+        // error here instead, which is the stronger check.
+        var discardedFields = 0
+        var reasonsSeen: Set<String> = []
         for trip in roundTrips {
-            for name in trip.discarded {
-                discardedNames += 1
-                if !explainable.contains(name) && !unexplained.contains(name) {
-                    unexplained.append(name)
-                }
+            for entry in trip.resolutions {
+                guard case .discarded(let reason) = entry.provenance else { continue }
+                discardedFields += 1
+                reasonsSeen.insert(explain(reason))
             }
         }
 
-        let honest = unrecordedMetric == 0 && perUnitMismatches == 0 && publicationLevelValues == 0
-            && unbacked == 0 && unexplained.isEmpty
         // **Coverage, not just outcome.** The first run of this probe reported
         // `yes` while `carriedRows` was 0: every native-first row lost its offset
         // or had it rebuilt, so the carrier arm had nothing to check and passed
-        // by having nothing to fail. The fixture now carries the missing row;
-        // this guard is what stops it going quiet again.
-        let decided = carriedRows > 0 && progressionRows > 0
+        // by having nothing to fail. The evidence is the rows that actually
+        // claim an offset was carried, so the guard cannot go quiet again — and
+        // it is the same entry point the monotonicity probe uses, rather than a
+        // second hand-rolled ternary.
+        let (execution, finding) = ProbeEvidence.conclude(
+            observed: min(carriedRows, progressionRows),
+            violations: unrecordedMetric + perUnitMismatches + publicationLevelValues + unbacked
+        )
 
-        // Rendered outside the literal: three levels of nested interpolation is
-        // more than this package is willing to bet a CI run on without a local
-        // compiler to check it.
-        let unexplainedText = unexplained.isEmpty ? "none" : unexplained.joined(separator: ", ")
 
         return try ProbeOutcome(
             name: "progress-provenance",
             question: "Does the artifact say where each number came from, and refuse to call a rebuilt value carried?",
-            execution: decided ? .measured : .inconclusive,
-            finding: decided ? (honest ? .yes : .no) : nil,
+            execution: execution,
+            finding: finding,
             detail: """
             (a) \(progressionRows) row(s) wrote into locations.progression: \(unrecordedMetric) without recording the dropped metric, \
             \(perUnitMismatches) not the per-resource fraction, \(publicationLevelValues) that are the publication-level number instead. \
@@ -604,7 +638,7 @@ enum ProgressProbes {
             and a publication-level \(decimal(publicationExample)) — the two candidates differ, which is what makes this checkable. \
             (b) \(carriedRows) of \(carriedRows + uncarriedRows) native-first rows call the offset carried; \(unbacked) of those have nothing in the locator that could have carried it. \
             unitID is excluded on purpose: locator(from:) builds the href from the unit and native(from:) reads it back to that same unit, so a verdict on it cannot vary — the defect the href field was deleted for, under another name. \
-            (c) \(discardedNames) discarded name(s) across the census; names the harness cannot explain: \(unexplainedText). \
+            (c) \(discardedFields) discarded field(s) across the census, in \(reasonsSeen.count) distinct refusal(s). \
             Falsified by writing the publication-level fraction into the field, and by a generous carried — which is what reported native-path-anchored as exact.
             """,
             numbers: [
@@ -619,8 +653,8 @@ enum ProgressProbes {
                 "nativeFirstRows": Double(nativeCases.count),
                 "carriedOffsetRows": Double(carriedRows),
                 "unbackedCarriedRows": Double(unbacked),
-                "discardedNames": Double(discardedNames),
-                "unexplainedNames": Double(unexplained.count)
+                "discardedFields": Double(discardedFields),
+                "distinctRefusals": Double(reasonsSeen.count)
             ]
         )
     }

@@ -126,15 +126,18 @@ do {
     print(line())
     for trip in report.roundTrips {
         print(pad(trip.name, 52) + outcomeLabel(trip.outcome))
-        // Where the value came from, when it was not carried, and every name the
-        // row's information was dropped under — from both directions. Until this
-        // round the inbound half of this list was pattern-discarded at its only
-        // call site and no one read it.
-        if let derivedFrom = trip.derivedFrom {
-            print("      · derived from \(derivedFrom), not carried")
-        }
-        if !trip.discarded.isEmpty {
-            print("      · dropped: \(trip.discarded.sorted().joined(separator: ", "))")
+        // The field table: what the input said, what came back, and what
+        // happened in between. **The two values are for a reader** — nothing
+        // derives a verdict from them; the verdict comes from the provenance in
+        // the last column, which is all the reducer ever sees.
+        for entry in trip.resolutions {
+            print(
+                "      "
+                    + pad(entry.field.described, 22)
+                    + pad(entry.original ?? "—", 14)
+                    + pad(entry.resolved ?? "—", 14)
+                    + entry.provenance.described
+            )
         }
         if case .recomputedEquivalent(let notes) = trip.outcome {
             for note in notes { print("      · \(note)") }

@@ -279,4 +279,23 @@ final class ProgressMetricTests: XCTestCase {
             )
         )
     }
-}
+
+
+    // MARK: - Probe evidence
+
+    /// The rule the whole harness leans on: **zero coverage is `inconclusive`,
+    /// never success.** Two probes in this package reported a `yes` they had no
+    /// row to earn, so this is not a hypothetical.
+    func testAProbeWithNoEvidenceCannotConclude() {
+        let empty = ProbeEvidence.conclude(observed: 0, violations: 0)
+        XCTAssertTrue(empty.execution == .inconclusive)
+        XCTAssertNil(empty.finding, "nothing was compared, so there is no finding to state")
+
+        let clean = ProbeEvidence.conclude(observed: 3, violations: 0)
+        XCTAssertTrue(clean.execution == .measured)
+        XCTAssertTrue(clean.finding == .yes)
+
+        let dirty = ProbeEvidence.conclude(observed: 3, violations: 1)
+        XCTAssertTrue(dirty.execution == .measured)
+        XCTAssertTrue(dirty.finding == .no)
+    }

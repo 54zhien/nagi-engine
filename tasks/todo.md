@@ -12,15 +12,28 @@ Phase 3    ReanchorService
 
 理由：`Anchor → Resolution → Reanchor` 是把恢复算法建立在分类器之上。而本轮已经查明分类器**不完全诚实** —— `discarded` 此前不进入最终判断，一次「解析失败」可以报告成「什么都没丢」。在已知有缺陷的仪器上盖恢复算法，之后所有重锚读数都要重新解释。
 
-**待办**（形状见下方「compare 重写的方向」）：
-- [ ] `compare` 不重新「猜」发生了什么：它**消费** bridge / resolver 已经产出的 provenance，不再看 `before == after` 反推
-- [ ] 逐字段的 `original` / `resolved` / `provenance` / `discardReason`（数值只给读者看，判定只读 provenance）
-- [ ] outcome 由字段状态经**一个 reducer** 导出，不再散落手写
-- [ ] `discarded` 成为一等公民：报告里能看到 `FIELD / ORIGINAL / RESOLVED / PROVENANCE`
-- [ ] probe 声明 `minimumEvidenceCount`（见 `lessons.md`）
-- [ ] 重跑 Phase 1 + Phase 2，确认所有旧读数只发生**预期**变化
+**计划全文**：`C:\Users\Azusa\.claude\plans\immutable-jingling-dragonfly.md`（已批准）。**分两次推送，各自读数。**
 
-**三处需要先定的冲突**（用户给出的 reducer 草案与阶段一实测结果不符）：见对话记录 —— ① 草案把 `recomputed` 并入 `semanticEquivalent`，而阶段一实测证明这两者必须分开（唯一的 `semantic` 行是被丢掉引文、**什么都没重算**的那行）；② 草案的四条规则里没有 `requiresValidator` 的位置；③ `FieldResolution.original/resolved` 会把数值摆回判定旁边，需要明文禁止 reducer 读它。
+### 第一次：comparator 重写，outcome 集合保持 6 个不动
+
+- [x] `LocatorField` / `Provenance` / `Bound` / `DiscardReason` / `FieldProvenance` / `FieldResolution` / `ResolutionShape`
+- [x] `OutcomeReducer.reduce(_:shape:refusalReason:row:)` —— **空投影抛错，不得 `exact`**
+- [x] `Resolution` 四个 case 携带 provenance；成功路径上的 append **不再是 discard**
+- [x] **偏移归宿移进 `locator(from:)`** —— `.structural` ≠ carried
+- [x] `RoundTrip.resolutions` 取代 `fields` / `discarded` / `derivedFrom`
+- [x] `mediaType` 删除（不可能变化的字段）；`otherLocations` 排除 `cssSelector`（重复计数）
+- [x] 有序数组 + `sortedFields`，**字典不进 Codable 类型**
+- [x] `ProbeEvidence`（`monotonicity` / `provenanceHonesty` 已接；另两个的判定不是单一 observed/violations 对，硬套会改读数，留到下一轮）
+- [ ] 推 CI，核对 **20 行桶一个都不许动**（`exact` **5** / `recomputed` 5 / `semantic` 1 / `loses` 3 / `reanchor` 6 / `validator` 0 —— 上一版记的 4 是 19 行时代的数，`4+5+1+3+6+0 = 19 ≠ 20`）
+
+### 第二次：两个零覆盖词汇定案
+
+- [ ] 补 `native-position-in-a-unit-that-no-longer-exists`（给 `requiresValidator` 覆盖）—— **但这不是实验**：`needsReanchor` 写死成 `false`，它不可能落进 `requiresReanchor`；真正的判断来自用例含义（unit 没了需要的是重锚）
+- [ ] `requiresValidator` 并入 `requiresReanchor`；词汇 6 → 5
+- [ ] `approximated` 删除，ADR-0009 的「有界」挂到 `recomputed` 的 `bound`（**已提前落地**）
+- [ ] `docs/adr/0004:49` 的「18 条」计数更新（今天 20）
+
+**三处与草案的冲突已定**（见对话记录与计划 §三）：① 两个名字都留（阶段一实测证明 `recomputed` 与 `semantic` 必须分开）；② `requiresValidator` 的零覆盖要正面处理；③ reducer 用**类型**收不到数值，而不是靠规则禁止。
 
 ---
 

@@ -29,7 +29,7 @@ public enum SpikeA {
         probes.append(try duplicateTextProbe(document))
         probes.append(try offsetBoundaryProbe(document))
 
-        let roundTrips = SpikeACases.all(document)
+        let roundTrips = try SpikeACases.all(document)
         probes.append(try identityRoundTripProbe(roundTrips))
 
         // ---- The metric matrix: ADR-0009's properties, on three axes ----
@@ -198,7 +198,7 @@ public enum SpikeA {
             in: document
         )
         var candidates = 0
-        if case .ambiguous(let positions, _) = resolution { candidates = positions.count }
+        if case .ambiguous(let positions, _, _) = resolution { candidates = positions.count }
 
         // The fixture guarantees the text repeats, so "the text occurs twice and
         // the bridge refuses to choose" is a yes. A single occurrence would mean
