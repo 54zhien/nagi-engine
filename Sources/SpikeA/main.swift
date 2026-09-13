@@ -65,44 +65,8 @@ func line(_ character: Character = "-", count: Int = 78) -> String {
     String(repeating: character, count: count)
 }
 
-/// **Right-pads, and does not truncate.** A value longer than its column is
-/// returned whole, which pushes every column after it on that line to the right.
-/// That is why the columns that **can** grow are measured with `columnWidth`
-/// instead of declared. The enum-bounded ones stay constants — `marker(...)`
-/// tops out at `INCONCLUSIVE` and `findingLabel(...)` at three characters, so
-/// measuring them would only reproduce the constant.
-///
-/// **Known and accepted:** the measurement is `String.count`, i.e. Character
-/// count, not terminal display width. A CJK value — `第一章`, `韩立望着眼前` —
-/// counts 3 and 6 but renders at roughly twice that in a monospaced terminal, so
-/// those rows still drift. Measuring display width needs an East Asian Width
-/// table, and this is a log for a human: the machine gate is the JSON artifact,
-/// which this file does not touch.
-func pad(_ text: String, _ width: Int) -> String {
-    text.count >= width ? text : text + String(repeating: " ", count: width - text.count)
-}
-
-/// The width a column needs: its widest cell **plus one**, or the old constant
-/// as a minimum.
-///
-/// Widening a constant only moves the cliff to the next longer value. Truncating
-/// with an ellipsis would drop half of a value a reader is looking at — and the
-/// values in these columns are hrefs and `cssSelector` strings, which are exactly
-/// the ones worth reading in full when some row is being puzzled over.
-///
-/// **The `+ 1` is load-bearing, and the first run without it proved so.**
-/// `pad` returns a string unchanged once it is at least `width` long, so a cell
-/// that *exactly* fills its column gets no separating space — and measuring the
-/// width guarantees that for the widest cell by construction. That run printed
-/// `native->locator->nativeneeds reanchor` and `OEBPS/chap1.xhtmlcarried`: the
-/// overflow was gone and a collision had taken its place. The widest cell now
-/// always gets exactly one trailing space.
-///
-/// (Named `minimum` rather than `floor` on purpose: `Foundation` exports a
-/// `floor(_:)`, and a parameter of that name shadows it inside this body.)
-func columnWidth(_ minimum: Int, _ cells: [String]) -> Int {
-    max(minimum, (cells.map(\.count).max() ?? 0) + 1)
-}
+// `terminalColumn` and `columnWidth` now live in `SpikeKit/TerminalColumns.swift`,
+// shared with Spike B, which had the same defect in its own copy.
 
 let outputDirectory = parseOutputDirectory()
 
@@ -125,27 +89,39 @@ do {
     // state a length that no measurement used.
     print("transcript   \(report.canonicalTextUTF16Length) UTF-16 units (units joined by a separator)")
     print("readingOrder \(report.readingOrderUTF16Length) UTF-16 units (the canonicalTextIndex denominator)")
+    // Both cells here come from the report, so both columns are measured.
+    // `document.href` carries a two-space indent and a filename that a real
+    // manifest will make longer than this fixture's.
+    let documentHrefWidth = columnWidth(34, report.documents.map { "  \($0.href)" })
+    let documentLengthWidth = columnWidth(14, report.documents.map { "\($0.utf16Length) units" })
     for document in report.documents {
         print(
-            pad("  \(document.href)", 34)
-                + pad("\(document.utf16Length) units", 14)
+            terminalColumn("  \(document.href)", documentHrefWidth)
+                + terminalColumn("\(document.utf16Length) units", documentLengthWidth)
                 + "\(document.elementCount) elements, \(document.explicitIDCount) with ids"
         )
     }
     print("")
 
     print(line())
-    // Measured, not declared: a probe name longer than the declared width pushes
-    // its EXECUTION column right on that row alone, which reads as a table that
-    // has slipped rather than as one long name.
+    // The name column is measured because a probe name is data. EXECUTION and
+    // FINDING are closed — `marker` returns one of three literals, `findingLabel`
+    // one of three — so their widths stay constants, and they still go through
+    // `terminalColumn` so that a closed set which grows later cannot silently
+    // collide.
     let probeNameWidth = columnWidth(26, report.probes.map(\.name) + ["PROBE"])
-    print(pad("PROBE", probeNameWidth) + pad("EXECUTION", 14) + pad("FINDING", 10) + "DETAIL")
+    print(
+        terminalColumn("PROBE", probeNameWidth)
+            + terminalColumn("EXECUTION", 14)
+            + terminalColumn("FINDING", 10)
+            + "DETAIL"
+    )
     print(line())
     for probe in report.probes {
         print(
-            pad(probe.name, probeNameWidth)
-                + pad(marker(for: probe.execution), 14)
-                + pad(findingLabel(probe.finding), 10)
+            terminalColumn(probe.name, probeNameWidth)
+                + terminalColumn(marker(for: probe.execution), 14)
+                + terminalColumn(findingLabel(probe.finding), 10)
         )
         print("    Q  \(probe.question)")
         print("    A  \(probe.detail)")
@@ -177,7 +153,7 @@ do {
     let originalWidth = columnWidth(14, everyField.map { $0.original ?? "—" })
     let resolvedWidth = columnWidth(14, everyField.map { $0.resolved ?? "—" })
     for trip in report.roundTrips {
-        print(pad(trip.name, tripNameWidth) + outcomeLabel(trip.outcome))
+        print(terminalColumn(trip.name, tripNameWidth) + outcomeLabel(trip.outcome))
         // The field table: one row per field the **input** stated, saying what
         // it said, what came back, and what happened in between. **The two
         // values are for a reader** — nothing derives a verdict from them; the
@@ -186,9 +162,9 @@ do {
         for entry in trip.transportResolutions {
             print(
                 "      "
-                    + pad(entry.field.described, fieldWidth)
-                    + pad(entry.original ?? "—", originalWidth)
-                    + pad(entry.resolved ?? "—", resolvedWidth)
+                    + terminalColumn(entry.field.described, fieldWidth)
+                    + terminalColumn(entry.original ?? "—", originalWidth)
+                    + terminalColumn(entry.resolved ?? "—", resolvedWidth)
                     + entry.provenance.described
             )
         }
@@ -249,8 +225,10 @@ do {
     print(line())
     print("ARTIFACTS")
     print(line())
-    print(pad("canonical-text.txt", 26) + "\(report.artifacts.canonicalText.byteCount) bytes")
-    print(pad("\(report.spike).fingerprint", 26) + "\(report.artifacts.fingerprint.byteCount) bytes")
+    // Closed: both names are literals written here, so the width stays a
+    // constant — but it still goes through `terminalColumn`.
+    print(terminalColumn("canonical-text.txt", 26) + "\(report.artifacts.canonicalText.byteCount) bytes")
+    print(terminalColumn("\(report.spike).fingerprint", 26) + "\(report.artifacts.fingerprint.byteCount) bytes")
     print("")
     print("artifacts written to \(outputDirectory.path)")
     print("  \(report.spike).json        machine gate — quantized, no run metadata")
