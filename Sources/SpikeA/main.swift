@@ -82,17 +82,26 @@ func pad(_ text: String, _ width: Int) -> String {
     text.count >= width ? text : text + String(repeating: " ", count: width - text.count)
 }
 
-/// The width a column needs: its widest cell, or the old constant as a minimum.
+/// The width a column needs: its widest cell **plus one**, or the old constant
+/// as a minimum.
 ///
 /// Widening a constant only moves the cliff to the next longer value. Truncating
 /// with an ellipsis would drop half of a value a reader is looking at — and the
 /// values in these columns are hrefs and `cssSelector` strings, which are exactly
 /// the ones worth reading in full when some row is being puzzled over.
 ///
+/// **The `+ 1` is load-bearing, and the first run without it proved so.**
+/// `pad` returns a string unchanged once it is at least `width` long, so a cell
+/// that *exactly* fills its column gets no separating space — and measuring the
+/// width guarantees that for the widest cell by construction. That run printed
+/// `native->locator->nativeneeds reanchor` and `OEBPS/chap1.xhtmlcarried`: the
+/// overflow was gone and a collision had taken its place. The widest cell now
+/// always gets exactly one trailing space.
+///
 /// (Named `minimum` rather than `floor` on purpose: `Foundation` exports a
 /// `floor(_:)`, and a parameter of that name shadows it inside this body.)
 func columnWidth(_ minimum: Int, _ cells: [String]) -> Int {
-    max(minimum, cells.map(\.count).max() ?? 0)
+    max(minimum, (cells.map(\.count).max() ?? 0) + 1)
 }
 
 let outputDirectory = parseOutputDirectory()
