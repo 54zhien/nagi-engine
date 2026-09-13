@@ -21,21 +21,18 @@ public enum RoundTripOutcome: Sendable, Hashable, Codable {
     /// it used something more precise.
     case semanticEquivalent(notes: [String])
     case loses(fields: [String])
-    /// **Reached by no path today, and that is a statement rather than an
-    /// oversight.** It was the catch-all for a shape whose outcome no field rule
-    /// could decide — `.notExpressible` — and that shape now goes to
-    /// `requiresReanchor` like every other one that produced no position. So the
-    /// census reads `requiresValidator: 0`, which it already did before this
-    /// change: the case has been zero-coverage for as long as the census has
-    /// been reported.
+    /// **This case absorbed `requiresValidator`, which no longer exists.** That
+    /// one was the catch-all for a shape whose outcome no field rule could
+    /// decide — `.notExpressible` — and once that shape began going here like
+    /// every other shape that produced no position, no path could produce it any
+    /// more. A case no path can produce is a number no measurement can move, and
+    /// `numbers["requiresValidator"]` was exactly that in the report.
     ///
-    /// It is kept for one round on purpose. Merging it into `requiresReanchor`
-    /// is the next round's change — `tasks/todo.md` has it as the vocabulary
-    /// count going 6 → 5 — and doing that merge here would put a vocabulary
-    /// rewrite inside a push whose whole criterion is that no bucket moves.
-    /// `main.swift`'s `outcomeLabel` keeps its arm, so deleting the case will
-    /// still be a compile error in the place that must notice.
-    case requiresValidator(reason: String)
+    /// Deleting it is **not** the same as deleting the question. What a validator
+    /// needs is a **candidate**, and whether a row produced one is a property of
+    /// the resolution's shape (`ResolutionShape.producedAPosition`), not of this
+    /// vocabulary — `RoundTrip.needsValidator` is where that answer lives, and it
+    /// did not move.
     case requiresReanchor(reason: String)
 }
 
@@ -294,11 +291,16 @@ public enum RoundTripHarness {
         )
         // **Every shape without a position, with no exception.** The
         // `shape != .notExpressible` carve-out existed because that shape's
-        // outcome was `requiresValidator` and a row could not need both — but it
+        // outcome was a validator verdict and a row could not need both — but it
         // produces no candidate either, and by the pipeline's own rule a step
         // with nothing from the step before it is skipped. Leaving the carve-out
         // would have moved the contradiction rather than removed it: the outcome
         // would say reanchor while this flag said no.
+        //
+        // That validator case has since been deleted: once the carve-out went it
+        // had no producer left, and this flag was the last thing still referring
+        // to it. The outcome it used to carry is decided in `OutcomeReducer.reduce`
+        // by the same `producedAPosition` test this line applies to the flag.
         let needsReanchor = !shape.producedAPosition
         // **A candidate is what a validator validates.** `.ambiguous` produced
         // several and something has to choose between them; `.unresolvable` and

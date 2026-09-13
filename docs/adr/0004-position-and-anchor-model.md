@@ -49,12 +49,14 @@ Quote/Context Reanchor → 解决跨版本、跨来源恢复
 - **本文件开头那句断言已由论断升级为测量。** 「缺 `AnchorValidator` 的后果比丢失更糟」原本是论证；spike 实测把它拆成了两行，因为**「需要 validator」与「需要 reanchor」不是一个问题的两个答案**：
 
   ```
-  21 条往返
+  22 条往返
   16 条产出了候选   → 16/16 有待验证的东西：15 条得到一个位置，1 条得到多个候选
-   6 条产不出位置   →  6/6  结构上做不出来，只能交给 ReanchorService
+   7 条产不出位置   →  7/7  结构上做不出来，只能交给 ReanchorService
   ```
 
   没有任何一条靠结构自证。这不是实现不足：`NativePosition` 是坐标，坐标里没有地方放「它当初凭什么被确立」。其中唯一看起来精确往返的那条，是靠 ADR-0009 禁止用于此途的 `Double` 算回来的。
+
+  **「产不出位置」这一行的第 7 条是 spike 封版时才补上的（2026-09-13）**，用例名 `native-position-in-a-unit-that-no-longer-exists`：在此之前 `ResolutionShape.notExpressible` —— 「位置根本写不出去」这个形状 —— 零覆盖，因为 **native 方向**每一行的 `unitID` 都取自 fixture 真有的 unit（两行 `unknown-href-*` 确实指着一个不存在的 href，但它们是 locator-first，`locator(from:)` 从没被递过 corpus 自己编的 `unitID`）。补上它之后，「产不出位置」不再只是一句断言，而是一条有行的路径。同日还删掉了 `RoundTripOutcome.requiresValidator` —— 那个 outcome 没有任何路径能产生，它当初正是掩盖这条路径的东西。
 
   **一条同时在两行里，而且是应当的**：`quotation-repeated` 的引文在文档里出现两次，bridge 找到 **2 个候选** —— 有东西可验证（`AnchorValidator` 要做的正是在候选中挑出仍然指向同一内容的那一个），但没有**单一位置**可确认（`ReanchorService` 是它的兜底）。把「有候选」与「有位置」当成同一件事，会让这一行两边都报错。
 

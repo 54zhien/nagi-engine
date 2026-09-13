@@ -294,6 +294,37 @@ enum SpikeACases {
             )
         ))
 
+        // **A position in a unit that no longer exists.** Every other row in the
+        // *native* direction draws its `unitID` from a unit the fixture has,
+        // which is exactly why `ResolutionShape.notExpressible` — the shape
+        // meaning "the position could not be written out at all" — has been
+        // zero-coverage for as long as the census has been reported.
+        //
+        // (The two `unknown-href-*` rows do name an href the manifest lacks, but
+        // they are locator-first: `locator(from:)` is only ever handed a
+        // `unitID` this corpus built, so its opening guard cannot fail for them.
+        // The universal above is about the native direction for that reason.)
+        //
+        // `LocationBridge.locator(from:in:)` opens with
+        // `guard let unit = document.unit(withID: position.unitID) else { return nil }`,
+        // so a position naming a unit the reading order does not contain is the
+        // one way through that guard. The row produces no candidate: it has
+        // nothing for `AnchorValidator` to confirm, so `needsValidator` is false
+        // and `needsReanchor` is true, and it goes to `ReanchorService` with the
+        // rest of the rows that produced no position.
+        //
+        // The unit is **named, not looked up**. Looking it up to build this case
+        // would defeat its only purpose, and would also make it silently start
+        // passing the day a unit with that name is added.
+        cases.append(NativeCase(
+            label: "native-position-in-a-unit-that-no-longer-exists",
+            position: NativePosition(
+                unitID: "OEBPS/removed.xhtml",
+                nodeID: .explicitID("p1"),
+                utf16Offset: 3
+            )
+        ))
+
         return cases
     }
 }

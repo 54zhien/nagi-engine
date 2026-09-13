@@ -62,10 +62,11 @@ public enum OutcomeReducer {
             let reason = refusalReason
                 ?? "\(row) could not be resolved (\(shape.rawValue)) and no reason was recorded"
             // **Every shape that produced no position goes to ReanchorService**,
-            // `.notExpressible` included. That last one used to return
-            // `.requiresValidator` — a catch-all in a vocabulary whose other
-            // rules are all about fields, chosen for the one shape that has no
-            // fields to rule on.
+            // `.notExpressible` included. That last one used to return a
+            // validator outcome — a catch-all in a vocabulary whose other rules
+            // are all about fields, chosen for the one shape that has no fields
+            // to rule on. That outcome case no longer exists at all, because
+            // this line is the only thing that could have produced it.
             //
             // What a validator works on is a **candidate**, and this shape
             // produces none: the position could not be written out at all, so

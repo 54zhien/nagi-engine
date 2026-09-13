@@ -57,7 +57,6 @@ func outcomeLabel(_ outcome: RoundTripOutcome) -> String {
     case .recomputedEquivalent: return "recomputed"
     case .semanticEquivalent: return "semantic"
     case .loses: return "loses fields"
-    case .requiresValidator: return "needs validator"
     case .requiresReanchor: return "needs reanchor"
     }
 }
@@ -66,8 +65,34 @@ func line(_ character: Character = "-", count: Int = 78) -> String {
     String(repeating: character, count: count)
 }
 
+/// **Right-pads, and does not truncate.** A value longer than its column is
+/// returned whole, which pushes every column after it on that line to the right.
+/// That is why the columns that **can** grow are measured with `columnWidth`
+/// instead of declared. The enum-bounded ones stay constants — `marker(...)`
+/// tops out at `INCONCLUSIVE` and `findingLabel(...)` at three characters, so
+/// measuring them would only reproduce the constant.
+///
+/// **Known and accepted:** the measurement is `String.count`, i.e. Character
+/// count, not terminal display width. A CJK value — `第一章`, `韩立望着眼前` —
+/// counts 3 and 6 but renders at roughly twice that in a monospaced terminal, so
+/// those rows still drift. Measuring display width needs an East Asian Width
+/// table, and this is a log for a human: the machine gate is the JSON artifact,
+/// which this file does not touch.
 func pad(_ text: String, _ width: Int) -> String {
     text.count >= width ? text : text + String(repeating: " ", count: width - text.count)
+}
+
+/// The width a column needs: its widest cell, or the old constant as a minimum.
+///
+/// Widening a constant only moves the cliff to the next longer value. Truncating
+/// with an ellipsis would drop half of a value a reader is looking at — and the
+/// values in these columns are hrefs and `cssSelector` strings, which are exactly
+/// the ones worth reading in full when some row is being puzzled over.
+///
+/// (Named `minimum` rather than `floor` on purpose: `Foundation` exports a
+/// `floor(_:)`, and a parameter of that name shadows it inside this body.)
+func columnWidth(_ minimum: Int, _ cells: [String]) -> Int {
+    max(minimum, cells.map(\.count).max() ?? 0)
 }
 
 let outputDirectory = parseOutputDirectory()
@@ -101,11 +126,15 @@ do {
     print("")
 
     print(line())
-    print(pad("PROBE", 26) + pad("EXECUTION", 14) + pad("FINDING", 10) + "DETAIL")
+    // Measured, not declared: a probe name longer than the declared width pushes
+    // its EXECUTION column right on that row alone, which reads as a table that
+    // has slipped rather than as one long name.
+    let probeNameWidth = columnWidth(26, report.probes.map(\.name) + ["PROBE"])
+    print(pad("PROBE", probeNameWidth) + pad("EXECUTION", 14) + pad("FINDING", 10) + "DETAIL")
     print(line())
     for probe in report.probes {
         print(
-            pad(probe.name, 26)
+            pad(probe.name, probeNameWidth)
                 + pad(marker(for: probe.execution), 14)
                 + pad(findingLabel(probe.finding), 10)
         )
@@ -124,8 +153,22 @@ do {
     print(line())
     print("ROUND TRIPS")
     print(line())
+    // Measured, not declared. Three of these columns were over their declared
+    // width: `tasks/todo.md` recorded two of them, and the longest value in the
+    // table — a row name — is one nobody had written down.
+    //
+    // **No lengths are quoted here on purpose.** A row name is its label plus a
+    // fixed suffix, and an href is an href; both change the moment a case or a
+    // fixture is added, so any literal in this comment would be a constant
+    // written from memory rather than an invariant — the rule in
+    // `tasks/lessons.md`. The measurement needs nobody to notice anything.
+    let everyField = report.roundTrips.flatMap(\.transportResolutions)
+    let tripNameWidth = columnWidth(52, report.roundTrips.map(\.name))
+    let fieldWidth = columnWidth(22, everyField.map(\.field.described))
+    let originalWidth = columnWidth(14, everyField.map { $0.original ?? "—" })
+    let resolvedWidth = columnWidth(14, everyField.map { $0.resolved ?? "—" })
     for trip in report.roundTrips {
-        print(pad(trip.name, 52) + outcomeLabel(trip.outcome))
+        print(pad(trip.name, tripNameWidth) + outcomeLabel(trip.outcome))
         // The field table: one row per field the **input** stated, saying what
         // it said, what came back, and what happened in between. **The two
         // values are for a reader** — nothing derives a verdict from them; the
@@ -134,9 +177,9 @@ do {
         for entry in trip.transportResolutions {
             print(
                 "      "
-                    + pad(entry.field.described, 22)
-                    + pad(entry.original ?? "—", 14)
-                    + pad(entry.resolved ?? "—", 14)
+                    + pad(entry.field.described, fieldWidth)
+                    + pad(entry.original ?? "—", originalWidth)
+                    + pad(entry.resolved ?? "—", resolvedWidth)
                     + entry.provenance.described
             )
         }
@@ -155,9 +198,6 @@ do {
         }
         if case .loses(let fields) = trip.outcome {
             print("      · dropped: \(fields.joined(separator: ", "))")
-        }
-        if case .requiresValidator(let reason) = trip.outcome {
-            print("      · \(reason)")
         }
         if case .requiresReanchor(let reason) = trip.outcome {
             print("      · \(reason)")

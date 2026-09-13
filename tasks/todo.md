@@ -141,10 +141,39 @@ progress-provenance  MEASURED yes
 
 ### 第三次：两个零覆盖词汇定案
 
-- [ ] `requiresValidator` 并入 `requiresReanchor`；词汇 6 → 5。**第二次推送已让这个 case 变成可证明的不可达**（reducer 对一切产不出位置的 shape 都返回 `requiresReanchor`，`refused()` 的 `needsReanchor` 也去掉了 `.notExpressible` 例外），所以 `numbers["requiresValidator"]` 是一个**没有任何测量能推动的数** —— 留着它就是本仓库点名过的「报告里出现没有测量在用的数」。删。
-- [ ] 补 `native-position-in-a-unit-that-no-longer-exists`。**前提已随第二次推送反转**：原文写「`needsReanchor` 写死成 `false`，它不可能落进 `requiresReanchor`」，而现在 `.notExpressible` **就是**落 `requiresReanchor` 且 `needsReanchor == true`。所以这一条不再是「给 `requiresValidator` 覆盖」，而是给 `.notExpressible` 这条路径**第一次**一个可观测的行 —— 它今天仍然零覆盖。
-- [ ] **零覆盖词汇清点**（第二次推送的审查代理列出，均非本轮引入）：`DiscardReason.nothingResolvable` **全仓库从不构造**（末尾那个 `unresolvable` 不为它写行，也没有对应的 `LocatorField`），而 `ProgressProbes.explain` 为它手写了文案；`selectorNamesNothing` / `unitCarriesNoText` / `unitHasNoAddressableElements` 由 bridge 构造但语料不可达（枚举 9 个 case，census 只走到 5 个）；`ObservationKind: CaseIterable` 从未被枚举；`ProgressScope.publication.described`（「publication-wide」）只被一个**否定**断言用到，不进任何 artifact 路径。arm (c) 按设计看不见这些（「名字的计数不能分划行」）。
-- [x] `docs/adr/0004:49` 的「18 条」计数更新 —— **第二次推送已做**（改成实测两行式：21 条 / 16 条产出候选 / 6 条产不出位置）。
+- [x] `requiresValidator` 并入 `requiresReanchor`；词汇 6 → 5。**第二次推送已让这个 case 变成可证明的不可达**（reducer 对一切产不出位置的 shape 都返回 `requiresReanchor`，`refused()` 的 `needsReanchor` 也去掉了 `.notExpressible` 例外），所以 `numbers["requiresValidator"]` 是一个**没有任何测量能推动的数** —— 留着它就是本仓库点名过的「报告里出现没有测量在用的数」。删。**已删**：case 本身、`outcomeLabel` 分支、`SpikeARunner` 的计数／求和式／`numbers` 键。注意**求和式从来抓不住它** —— 恒为 0 的桶靠恒等于 0 满足分划不变量；分划数的是行，不是可达性。
+- [x] 补 `native-position-in-a-unit-that-no-longer-exists`。**前提已随第二次推送反转**：原文写「`needsReanchor` 写死成 `false`，它不可能落进 `requiresReanchor`」，而现在 `.notExpressible` **就是**落 `requiresReanchor` 且 `needsReanchor == true`。所以这一条不再是「给 `requiresValidator` 覆盖」，而是给 `.notExpressible` 这条路径**第一次**一个可观测的行 —— 它今天仍然零覆盖。**已补**：`unitID` 取 `OEBPS/removed.xhtml`，**具名而不查找** —— 去查它会让这个用例失去唯一的目的，且哪天真有同名 unit 出现它会静默变成另一回事。
+- [x] **零覆盖词汇清点**（第二次推送的审查代理列出，均非本轮引入）：`DiscardReason.nothingResolvable` **全仓库从不构造**（末尾那个 `unresolvable` 不为它写行，也没有对应的 `LocatorField`），而 `ProgressProbes.explain` 为它手写了文案；`selectorNamesNothing` / `unitCarriesNoText` / `unitHasNoAddressableElements` 由 bridge 构造但语料不可达（枚举 9 个 case，census 只走到 5 个）；`ObservationKind: CaseIterable` 从未被枚举；`ProgressScope.publication.described`（「publication-wide」）只被一个**否定**断言用到，不进任何 artifact 路径。arm (c) 按设计看不见这些（「名字的计数不能分划行」）。**已定案**：
+  - **删** `nothingResolvable` + 两处文案。判据收紧为：**从未构造「且」有 artifact 文案声称它可达** —— 全仓库只有它同时满足。它不只是没被构造，`ProgressProbes.explain` 还为一个不可达路径手写了读起来像可达的句子。
+  - **保留并标注** `selectorNamesNothing` / `unitCarriesNoText` / `unitHasNoAddressableElements`（各写清可达条件）、`ObservationKind` 的 `CaseIterable`（声明了但 `allCases` 从未被枚举，且全仓库没有一处 `switch` 它）、`ProgressScope`。
+  - **`ProgressScope` 那条要写准**：不可达的是 `described` 的 `.publication` **那一臂**（唯一调用点 `LocationBridge.swift:444` 的 `perUnit.scope` 恒为 `.resource`），**case 本身有覆盖**（`ProgressMetricTests.swift:74` 正面断言，两个 probe 走真实路径）。写成「`.publication` 零覆盖」就是记了一句过头的实话。
+  - **同类但不同处理**：`PublicationProgressMetric.readiumPositions` / `.custom(String)` 从未构造，但 ADR-0009 结尾已明文保留（「不打算为了矩阵对称去凑」）；`ProbeOutcome.Execution.unsupported` 无构造点，但在 Spike B 模块且没有任何 artifact 文案声称它可达。**都没动。**
+- [x] `docs/adr/0004:49` 的「18 条」计数更新 —— **第二次推送已做**（改成实测两行式）；**本轮再更新为 22 条 / 16 条产出候选 / 7 条产不出位置**，并写明第 7 条是补上 `.notExpressible` 后才有的。
+
+#### 第三次收口的判据与预测（**推前写死，与实际不符时先解释差异，不得直接改预期**）
+
+| 判据 | 现（21 例） | 预测（22 例） |
+|---|---|---|
+| `cases` | 21 | **22** |
+| `exact` / `recomputedEquivalent` / `semanticEquivalent` / `losesFields` | 5 / 5 / 2 / 3 | **5 / 5 / 2 / 3（逐个不动）** |
+| `requiresReanchor` | 6 | **7** |
+| `needingValidator` | 16 | **16** |
+
+分划断言 5+5+2+3+7 = 22 ✓。新行产不出候选 → 只进「产不出位置」那行，不进「有候选」那行。
+
+**`progress-provenance` 也会动，这一条上一版计划没写**：新行是 native-first，被 (b) 臂看到（`ProgressProbes` 里 `zip(nativeCases, nativeTrips)` 按下标配对）。预测 `roundTrips` 21→22、`nativeFirstRows` 5→**6**、(b) detail 由「1 of 5」变「**1 of 6**」，而 `carriedOffsetRows` 仍 1、`unbackedCarriedRows` 仍 0、`statedFieldRows` 仍 39、`discardedFields` 仍 7、`distinctRefusals` 仍 5（新行 `transportResolutions` 为空，(d) 只跑 locator-first census）。其余四个 probe 一个数都不该动。
+
+**指纹会变，且这是预期的、不是漂移**：`detail` 串里删掉了 `N blocked for another reason` 一段，而指纹覆盖报告载荷。判据是**三进程彼此一致**，不是与上一轮的指纹相等（前几轮同理：`3c897327…` → `2001124351669c65…`）。
+
+**stdout 表宽这一项结构上不动任何读数** —— 指纹算的是 `spike-a.json`，stdout 不入指纹。这也是它敢和读数改动同推的理由。
+
+#### 本轮顺带修掉的、计划原文没记的两列
+
+原文只记了字段表的 `original` / `resolved` 两列溢出。逐列量过之后发现**溢出的有三列**：`trip.name` 声明 52 而 `native-id-anchored-at-element-start` 是 **60**（挤掉同行 outcome 词 8 列）、`probe.name` 声明 26 而 `progress-layout-independence` 是 **28**。这两列**既存且从未被记录**。封版前一并修掉，否则封的是个已知有裂的表。
+
+改法是由内容量宽（`max(声明下限, 该列最宽值)`），不是给常数换个更大的数 —— 换常数只是把悬崖挪个位置；截断则会把 `body > p:nth-child(3)` 削成读者正需要的那半个选择器。
+
+**已知且接受**：`pad` 量的是 `String.count`（Character 数），不是终端显示宽度。CJK 值（`第一章`、`韩立望着眼前`）计数 3／6 而显示约 6／12 列，仍会漂。正确修法要一张 East Asian Width 表，而这是给人读的日志、机器闸门是 JSON。**已写进代码注释**，不假装量宽解决了它。
 
 **已在本轮代码里写明的两处「已知且接受」**（不是欠账，是不改）：
 - `uncarriableProvenance` 先占下的字段（`.position` / `.totalProgression`）保持 `.documentLevel`，扫尾不覆盖它 —— 那个裁定说的是**字段本身**，扫尾的理由只说**这一次解析的路线**，前者更强。语料里没有同时声明 fragment 与 position 的行。
@@ -170,7 +199,8 @@ progress-provenance  MEASURED yes
 - [x] `main.swift` `outcomeLabel` 加 case（编译期绊线）
 - [x] `identityRoundTripProbe` 加桶 + **分划断言**（`RoundTripCensusError`）
 - [x] 测试同步（`carried` 改名 + 新增两处断言）
-- [ ] **未做**：`compare` 的判定输入改为 `Resolution.discarded`（今天仍无人读取）；ADR 更新
+- [x] ~~**未做**：`compare` 的判定输入改为 `Resolution.discarded`（今天仍无人读取）；ADR 更新~~
+      > ⚠️ **已被取代，两半都不成立。** (1) **`compare` 不存在了** —— 它在 `98e3023`（"Make the comparator interpret provenance instead of guessing it"）里随 provenance 引入一并删除；两个方向现在都经 `OutcomeReducer.reduce`，而「拿 before 与 after 比」这件事已经是**类型的性质**（`[FieldProvenance]` 里没有地方放那两个值）而不是一条要记住的规则。(2) **`Resolution.discarded` 今天被读** —— `OutcomeReducer.swift` 的 `notCarried` 那一步用它把拒绝判进 `semanticEquivalent`，`ProgressProbes` 又把它数进 `discardedFields` / `distinctRefusals`。原文保留仅为留痕。
 
 ### 阶段二：metric 矩阵 ✅ 已完成（`e2c23ec` + `d430736`，CI run 34679508081 两 gate 全绿）
 
@@ -300,7 +330,7 @@ identity-round-trip  20 cases: 5 exact, 5 recomputed-equivalent, 1 semantic-equi
 
 #### 未做（各自独立）
 
-- `compare` 的逐行重写（判定输入改为 `discarded`）。
+- ~~`compare` 的逐行重写（判定输入改为 `discarded`）。~~ ⚠️ **已被取代**：`compare` 已在 `98e3023` 删除，`discarded` 已被读。见上方「阶段一」那条的说明。
 - `ReanchorService` 的模糊匹配（仍只判定「需要它」，本轮 6 例）。
 - `readiumPositions` / `custom` 两个 metric：没有 archive 可测，且 `custom` 是实现一种不存在的 metric。**不是欠账，是范围。**
 - ADR-0003 的文档序键。
@@ -332,9 +362,9 @@ N  cases=19  exact=4  recomputedEquivalent=5  semanticEquivalent=1  losesFields=
 
 #### 尚未做
 
-- `compare` 的判定输入改为 `Resolution.discarded`（**今天全仓库无人读取它**）—— 这是计划里的「逐行重写」，本轮未动。
-- ADR-0004 / 0009 的对应更新。
-- `SpikeARunner.swift:14-17` 的 `"\n"` join 与 `Document.totalLength` 差 2 —— 未标注。
+- ~~`compare` 的判定输入改为 `Resolution.discarded`（**今天全仓库无人读取它**）—— 这是计划里的「逐行重写」，本轮未动。~~ ⚠️ **已被取代**：`compare` 已在 `98e3023` 删除；`discarded` 由 reducer 与 probe 两处读取。
+- ADR-0004 / 0009 的对应更新。**第二次推送已做**；0004 的计数本轮再同步一次（22 / 16 / 7）。
+- ~~`SpikeARunner.swift:14-17` 的 `"\n"` join 与 `Document.totalLength` 差 2 —— 未标注。~~ ⚠️ **已过期**：`SpikeARunner.swift:61-64` 已写明这个差（"a smaller number than the transcript above by one separator per gap"）。
 - **阶段二（metric 矩阵）整体未开始。**
 
 

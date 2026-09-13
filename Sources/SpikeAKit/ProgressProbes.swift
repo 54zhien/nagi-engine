@@ -86,8 +86,6 @@ enum ProgressProbes {
             return "the unit has no elements a position could name"
         case .globalPositionNeedsThePositionsTable:
             return "a global position needs the publication's positions table, which a coordinate cannot hold"
-        case .nothingResolvable:
-            return "the locator carried nothing this bridge can resolve"
         case .aMorePreciseAnchorResolvedIt:
             return "a structural anchor resolved the position first, so this field was never consulted"
         }

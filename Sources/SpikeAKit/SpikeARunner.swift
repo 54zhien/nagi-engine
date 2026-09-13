@@ -266,7 +266,6 @@ public enum SpikeA {
         let recomputed = count { if case .recomputedEquivalent = $0 { return true }; return false }
         let semantic = count { if case .semanticEquivalent = $0 { return true }; return false }
         let loses = count { if case .loses = $0 { return true }; return false }
-        let validator = count { if case .requiresValidator = $0 { return true }; return false }
         let reanchor = count { if case .requiresReanchor = $0 { return true }; return false }
         let needingValidator = roundTrips.filter(\.needsValidator).count
 
@@ -277,7 +276,12 @@ public enum SpikeA {
         // and not one word of `detail` changes. Only the sum can see it, so the
         // sum has to be checked. (`main.swift`'s `outcomeLabel` is the
         // compile-time tripwire; this is the runtime one. Neither is optional.)
-        let counted = exact + recomputed + semantic + loses + validator + reanchor
+        //
+        // Five buckets and not six: `requiresValidator` was deleted, because no
+        // path could produce it. Note what this sum could and could not do about
+        // that — a bucket that is always zero satisfies the sum by being zero, so
+        // the invariant never caught it. The sum counts rows, not reachability.
+        let counted = exact + recomputed + semantic + loses + reanchor
         guard counted == roundTrips.count else {
             throw RoundTripCensusError.bucketsDoNotSum(
                 rows: roundTrips.count,
@@ -290,14 +294,13 @@ public enum SpikeA {
             question: "Which conversions survive a round trip, and which need a validator or a reanchor?",
             execution: roundTrips.isEmpty ? .inconclusive : .measured,
             finding: roundTrips.isEmpty ? nil : .yes,
-            detail: "\(roundTrips.count) cases: \(exact) exact, \(recomputed) recomputed-equivalent, \(semantic) semantic-equivalent, \(loses) losing fields, \(validator) blocked for another reason, \(reanchor) needing a reanchor. \(needingValidator) of them produced a candidate, so \(needingValidator) of them have an AnchorValidator's work to do — the rest produced none, which is why this is not \(roundTrips.count).",
+            detail: "\(roundTrips.count) cases: \(exact) exact, \(recomputed) recomputed-equivalent, \(semantic) semantic-equivalent, \(loses) losing fields, \(reanchor) needing a reanchor. \(needingValidator) of them produced a candidate, so \(needingValidator) of them have an AnchorValidator's work to do — the rest produced none, which is why this is not \(roundTrips.count).",
             numbers: [
                 "cases": Double(roundTrips.count),
                 "exact": Double(exact),
                 "recomputedEquivalent": Double(recomputed),
                 "semanticEquivalent": Double(semantic),
                 "losesFields": Double(loses),
-                "requiresValidator": Double(validator),
                 "requiresReanchor": Double(reanchor),
                 "needingValidator": Double(needingValidator)
             ]

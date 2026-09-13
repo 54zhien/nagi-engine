@@ -117,11 +117,35 @@ public enum DiscardReason: String, Sendable, Hashable, Codable, CaseIterable {
     case hrefMatchesNoUnit
     case fragmentNamesNothing
     case selectorNotUnderstood
+    /// **Reachable in the bridge, unreachable from this corpus — and kept.**
+    /// `LocationBridge` reports it when a `cssSelector` that is a plain `#id`
+    /// names no element (that file's `selectorNamesNothing` guard). No corpus
+    /// locator can reach it: the only locators carrying a `cssSelector` are
+    /// `mixed-evidence-locator` (which states a fragment too, so the fragment
+    /// branch returns `.structural` first), `js-shaped-selector` (whose `#p4`
+    /// exists), and `js-shaped-complex-selector` (whose selector is not a plain
+    /// `#id`, so it is refused earlier as `selectorNotUnderstood`).
+    ///
+    /// This is the fixture's limitation, not the word's. Deleting it would delete
+    /// a real branch of the bridge's error reporting, and the corpus is a spike
+    /// fixture rather than production coverage.
     case selectorNamesNothing
+    /// **Reachable in the bridge, unreachable from this corpus — and kept.**
+    /// Reported when the progression rung is taken — the fragment and selector
+    /// rungs did not return first — and the unit it resolves to has zero length.
+    /// A `progression` does **not** have to be the locator's only channel:
+    /// `positions-service-shaped` states one alongside `position` and
+    /// `totalProgression`, and would report this too if it pointed at a blank
+    /// unit.
+    ///
+    /// No corpus locator names the zero-length unit `OEBPS/blank.xhtml`: every
+    /// `progression` row in the corpus targets `OEBPS/chap1.xhtml`.
     case unitCarriesNoText
+    /// **Reachable in the bridge, unreachable from this corpus — and kept.**
+    /// Needs a unit that carries text but has an empty element table — a shape no
+    /// fixture unit has.
     case unitHasNoAddressableElements
     case globalPositionNeedsThePositionsTable
-    case nothingResolvable
     /// A structural anchor named the element first, and this field was never
     /// consulted. **Not a failure** — ADR-0004's ladder puts ids above numbers,
     /// so an id outranking a fraction is the ladder working. It is still a
@@ -130,6 +154,20 @@ public enum DiscardReason: String, Sendable, Hashable, Codable, CaseIterable {
     /// two fewer fields than it was given.
     case aMorePreciseAnchorResolvedIt
 
+    // **`nothingResolvable` used to sit here and was deleted, not renamed.**
+    // Nothing in the repository ever constructed it — not the bridge, not a
+    // test, not a decoder — while `ProgressProbes.explain` hand-wrote a
+    // sentence for it as though some path reached it. A word that is never
+    // constructed *and* is described as reachable is the same defect as a
+    // `numbers` key no measurement can move.
+    //
+    // The path it was written for exists, and still says what it always said:
+    // `LocationBridge.native(from:)` ends by returning `.unresolvable` with the
+    // reason string "the locator carries nothing this bridge can resolve" —
+    // reached by `unknown-href-with-fallback`. That sentence lives in the
+    // resolution's `reason`, which is prose for a reader, not a member of this
+    // vocabulary. The two were never the same thing; this enum just had a spare
+    // word for it.
     public var described: String {
         switch self {
         case .hrefMatchesNoUnit:
@@ -146,8 +184,6 @@ public enum DiscardReason: String, Sendable, Hashable, Codable, CaseIterable {
             return "the unit has no addressable elements"
         case .globalPositionNeedsThePositionsTable:
             return "a global position needs the publication's positions table, which a coordinate cannot hold"
-        case .nothingResolvable:
-            return "the locator carried nothing this bridge can resolve"
         case .aMorePreciseAnchorResolvedIt:
             return "a more precise anchor resolved the position, so this field was never consulted"
         }
@@ -293,9 +329,10 @@ public enum ResolutionShape: String, Sendable, Hashable, Codable {
     /// `producedAPosition` is false for it, which places it with `.unresolvable`
     /// rather than apart from it: it yields no candidate, so `AnchorValidator`
     /// has nothing to work on and the row goes to `ReanchorService` with the
-    /// rest. It used to be the one shape whose outcome was `requiresValidator`,
-    /// which put it outside both flags' rules and let the outcome and
-    /// `needsValidator` contradict each other inside one struct.
+    /// rest. It used to be the one shape whose outcome was a validator verdict —
+    /// a case that has since been deleted for having no producer — which put it
+    /// outside both flags' rules and let the outcome and `needsValidator`
+    /// contradict each other inside one struct.
     case notExpressible
 
     /// Whether the shape is one that produced a position.
@@ -358,6 +395,24 @@ public enum RecomputeBasis: Sendable, Hashable, Codable {
 /// moved an offset from 22 to 9 while every census bucket still added up.
 public enum ProgressScope: Sendable, Hashable, Codable {
     /// A fraction of the whole publication.
+    ///
+    /// **The case is covered; its rendering is not.** `CanonicalTextIndexAxis`
+    /// produces it on the real path, `ProgressMetricTests` asserts it positively,
+    /// and two probes walk it. What has never been evaluated at runtime is the
+    /// `.publication` arm of `described` below: the property's only call site is
+    /// `LocationBridge.locator(from:)`, on `perUnit.scope`, which is always
+    /// `.resource`. So that **arm's return value** reaches no artifact.
+    ///
+    /// The wording matters here, because the obvious version of this sentence is
+    /// false: the *string* `"publication-wide"` does reach the artifact — as
+    /// prose in `ProgressProbes.provenanceHonesty`'s detail ("resource-scoped
+    /// rather than publication-wide"), which is a different thing in a different
+    /// place. The one test that touches this string asserts its **absence** from
+    /// a `scopeDroppedToFitTheMirror` observation.
+    ///
+    /// Recorded rather than deleted: the arm is what a `ProgressScope` that
+    /// travels is supposed to say, and a `switch` with a missing case is worse
+    /// than a rendering nothing reads yet.
     case publication
     /// A fraction of one resource. `locations.progression` is this one, and
     /// `LocationBridge.native(from:)` inverts it against `unit.length`.
@@ -398,6 +453,17 @@ public struct Observation: Sendable, Hashable, Codable {
     }
 }
 
+/// `CaseIterable`, and **`allCases` is deliberately never enumerated.**
+///
+/// Every place an observation kind is inspected compares it with `==`; there is
+/// no `switch` over this type anywhere in the repository.
+///
+/// **Which means a third case would be caught by nothing.** `DiscardReason` is
+/// protected by two exhaustive `switch`es (`DiscardReason.described` and
+/// `ProgressProbes.explain`) that turn a new case into a compile error. This type
+/// has no equivalent — no `switch` to fail to compile, and `allCases` never
+/// walked. Stated rather than papered over: the conformance is an affordance for
+/// an arm that may want to enumerate, not a check that anything current performs.
 public enum ObservationKind: String, Sendable, Hashable, Codable, CaseIterable {
     /// `locations.progression` is a bare `Double` because that is Readium's
     /// shape, so the label has nowhere to go — ADR-0009:73's gap.
