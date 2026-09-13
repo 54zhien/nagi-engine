@@ -167,6 +167,74 @@ progress-provenance  MEASURED yes
 
 **stdout 表宽这一项结构上不动任何读数** —— 指纹算的是 `spike-a.json`，stdout 不入指纹。这也是它敢和读数改动同推的理由。
 
+#### 第三次收口的实际读数（第一次推送 `eadc404`，CI run 34739517853，两 gate 全绿）
+
+**预测逐条命中，无一偏离。**
+
+```
+identity-round-trip  22 cases: 5 exact, 5 recomputed-equivalent, 2 semantic-equivalent,
+                     3 losing fields, 7 needing a reanchor. 16 of them produced a candidate.
+   cases=22  exact=5  recomputedEquivalent=5  semanticEquivalent=2
+   losesFields=3  requiresReanchor=7  needingValidator=16
+   —— `requiresValidator` 这个键已从 numbers 里消失
+
+progress-provenance  roundTrips=22  nativeFirstRows=6  carriedOffsetRows=1
+                     unbackedCarriedRows=0  statedFieldRows=39  discardedFields=7
+                     distinctRefusals=5  progressionRows=5
+   (b) 1 of 6 native-first rows call the offset carried   ← 预测的「1 of 6」
+其余七个 probe 一个数都没动（含四个 metric probe，全 MEASURED / yes）
+determinism fingerprint 1872e4ffc0cb69fc… 三进程一致 → MEASURED / yes
+```
+
+**指纹变了且是预期的**（`2001124351669c65…` → `1872e4ff…`）：`detail` 串里删掉了 `N blocked for another reason` 一段，而指纹覆盖报告载荷。判据始终是**三进程彼此一致**，不是与上一轮相等。
+
+新行本身（从 artifact 直接读的，不是从绿勾推的）：
+
+```json
+{ "name": "native-position-in-a-unit-that-no-longer-exists native->locator->native",
+  "needsReanchor": true, "needsValidator": false,
+  "outcome": { "requiresReanchor": { "reason": "the position could not be expressed at all" } },
+  "transportResolutions": [] }
+```
+
+`.notExpressible` 第一次有了一行，而且它的 `needsValidator` 是 **false**、`needsReanchor` 是 **true** —— 这正是删掉那个死 case 的理由在实测上的样子。
+
+#### ⚠️ 第一次推送的 stdout 表**没修好**，原因是我自己引入的（第二次推送 `7b648b4` 修）
+
+读数全对，但**读日志时发现表反而更糟了**：
+
+```
+native-position-in-a-unit-that-no-longer-exists native->locator->nativeneeds reanchor
+      href                  OEBPS/chap1.xhtml    OEBPS/chap1.xhtmlcarried
+```
+
+列**对齐了**（每列起点一致），但最宽的单元格与下一列**粘在一起**。根因：`pad` 在 `text.count >= width` 时原样返回不补空格，而**量宽恰好保证了最宽的单元格正好等于列宽** —— 我把「溢出」换成了「必然粘连」，同一个缺陷换了个症状。
+
+修法：`columnWidth` 保留一个尾随空格（`max(minimum, 最宽值 + 1)`）。**这一处只能靠读输出抓到，绿勾看不见它** —— 正是本仓那条「re-check the instrument before the subject」的实例，只不过这次仪器是我刚造的那一件。
+
+**顺带发现（不在本次范围）**：Spike B 的 probe 表有**同一个**粘连 —— `kinsoku-baseline-behaviorMEASURED`，25 字符撞声明宽 24。那是 Spike B 的表，`pad` 也是另一个模块里的另一份拷贝。连同它那条写反的文档注释一起记着。
+
+#### 第二次推送 `7b648b4` 的读数（CI run 34739667503，两 gate 全绿）
+
+**判据是先写死的，而且它把「只动了 stdout」从一句声称变成了一次测量**：run 2 的 `spike-a.json` 与 run 1 **逐字节相同** —— sha256 两边都是 `0177d3bffac24e23e0dcc7573c071cfda812fc2157cf2ab7ade1eeab7d7cf886`，指纹同为 `1872e4ff…`。
+
+stdout 三处粘连全部消除，逐个量过（▪ = 空格）：
+
+```
+run 1  native-position-in-a-unit-that-no-longer-exists native->locator->nativeneeds reanchor
+run 2  native-position-in-a-unit-that-no-longer-exists native->locator->native▪needs▪reanchor   ✓
+
+run 1        href                  OEBPS/chap1.xhtml    OEBPS/chap1.xhtmlcarried
+run 2        href                  OEBPS/chap1.xhtml     OEBPS/chap1.xhtml▪carried             ✓
+
+run 1  progress-layout-independenceMEASURED
+run 2  progress-layout-independence▪MEASURED                                                       ✓
+```
+
+三处都是同一条规则：**量宽之后最宽的单元格恰好等于列宽，而 `pad` 在 `count >= width` 时不补空格**。`+1` 之后每个超宽列的最宽值恰好得到一格。
+
+#### 本轮顺带修掉的、计划原文没记的两列
+
 #### 本轮顺带修掉的、计划原文没记的两列
 
 原文只记了字段表的 `original` / `resolved` 两列溢出。逐列量过之后发现**溢出的有三列**：`trip.name` 声明 52 而 `native-id-anchored-at-element-start` 是 **60**（挤掉同行 outcome 词 8 列）、`probe.name` 声明 26 而 `progress-layout-independence` 是 **28**。这两列**既存且从未被记录**。封版前一并修掉，否则封的是个已知有裂的表。
