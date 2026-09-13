@@ -233,6 +233,32 @@ run 2  progress-layout-independence▪MEASURED                                  
 
 三处都是同一条规则：**量宽之后最宽的单元格恰好等于列宽，而 `pad` 在 `count >= width` 时不补空格**。`+1` 之后每个超宽列的最宽值恰好得到一格。
 
+#### 第三次收口的外部复核：Codex 抓到一个真漏洞（第三次推送 `ad02ef7` + `bb99fad`）
+
+把封版交接给**另一个模型**独立复核（herdr 窗格里那个 Codex，10 分 12 秒）。它把交接文档当作**待验证的主张**而不是结论，实际读了 `83be76a..b3fd156` 的完整 diff、源码与测试。
+
+**它抓到一个真漏洞，是我的疏漏**：新增的 `native-position-in-a-unit-that-no-longer-exists` **没有专门断言**。`IdentityTests.swift` 里那条 `testARowWithNoCandidateDoesNotClaimAValidator` 测的是复杂 selector，不是这条 `.notExpressible`。**这违反本仓自己「改某一行读数前先问有没有测试钉住该行」的规则** —— 而且 `native-path-anchored` 当年就是因为零覆盖而长期判错。
+
+**它纠正了我两处断言**（我逐条验证，它是对的）：
+
+1. **`ProbeOutcome.Execution.unsupported` 不在 Spike B 模块** —— 它在共享的 `Sources/SpikeKit/Report.swift:72`，Spike A 与 B 各有一个格式化分支（`SpikeA/main.swift:42`、`SpikeB/main.swift:43`）。我交接文档里写「在 Spike B 模块」是错的，因此我用它当理由放过它也不成立。
+2. **「Actions 升 Node 24 可能空转」是错的** —— 它去拉了官方 `action.yml`：`actions/checkout@v4` 的 `runs.using` 是 **`node20`**（我独立复核了 `raw.githubusercontent.com/actions/checkout/v4/action.yml`，确认 `node20`），要到 **v6** 才切 Node 24。所以 `ci.yml` 的升级是**实际工作**。
+
+**它对其余各条的裁决**：`readiumPositions` / `.custom(String)` **都该保留**（前者是外部坐标域的合法身份，fixture 没有真 archive ≠ 概念不存在；后者是显式扩展口，**为覆盖率造一个假 metric 反而会污染 spike 结论**）；`columnWidth + 1` **没打错地方**（`pad` 的 width 是最终串长，最宽内容恰等于 width 时就没有分隔空格，所以列宽必须含一个 separator；但**不能只改 `pad` 的 `>=` 分支**，否则短行与最长行会再次不一致）；七条预测全中**不可疑**，但**总计数可能被「此消彼长」蒙混** —— 这正是缺断言那条真正的危害。
+
+它还独立指出了本记录里的三处文档缺陷（重复标题 + 顶部 Phase 2.5 仍写「下一阶段」），已在 `bb99fad` 修掉，连同那段里我没跟着改的三个错数。
+
+**第三次推送的读数（CI run 34740976598，两 gate 全绿）**
+
+```
+Gate 1   141 tests / 0 failures        （140 → 141，预测命中）
+Gate 2   指纹 1872e4ff… 三进程一致
+```
+
+**判据先写死并成立**：测试不产出 artifact（artifact 只由 `spike-a` 可执行文件产出），所以 `spike-a.json` 应与 run 1 **逐字节相同** —— 实测 sha256 三方一致，全为 `0177d3bffac24e23e0dcc7573c071cfda812fc2157cf2ab7ade1eeab7d7cf886`。
+
+新断言**从语料读回那一行**而不是重写一遍（两者不会漂移），并且**断言了前提**：那个 unit 确实不存在 —— 否则哪天真有同名 unit，这条用例会静默变成另一个测量。断言内容：无候选、无位置、**字段表完全为空**（这一点区分了本 shape 与 `.unresolvable`）、且 reason 点名发生了什么而不只是「发生了某事」。
+
 #### 本轮顺带修掉的、计划原文没记的两列
 
 原文只记了字段表的 `original` / `resolved` 两列溢出。逐列量过之后发现**溢出的有三列**：`trip.name` 声明 52 而最长的用例名超出它、`probe.name` 声明 26 而 `progress-layout-independence` 是 **28**。这两列**既存且从未被记录**。封版前一并修掉，否则封的是个已知有裂的表。
