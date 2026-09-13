@@ -5,10 +5,17 @@ import SpikeKit
 public enum SpikeA {
     public static let identifier = "spike-a"
 
+    /// `async` since R2, because the reanchor-policy probe calls the public
+    /// `ReanchorService.reanchor`, which is `async throws` — production has to
+    /// materialise a unit before it can read text (ADR-0004), and the signature
+    /// says so even while this round is handed a materialised document.
+    ///
+    /// Nothing else about the run changed: every earlier probe is still
+    /// synchronous and still called in the same order.
     public static func run(
         outputDirectory: URL,
         expectedFingerprint: String? = nil
-    ) throws -> SpikeAReport {
+    ) async throws -> SpikeAReport {
         let document = try SpikeAFixture.document()
 
         // **This is the transcript artifact's text, not the metric's.**
@@ -37,6 +44,14 @@ public enum SpikeA {
         probes.append(try ProgressProbes.layoutIndependence())
         probes.append(try ProgressProbes.boundedSeek())
         probes.append(try ProgressProbes.provenanceHonesty(document))
+
+        // ---- Reanchor: ADR-0012's contract, measured ----
+        //
+        // **Appended last, and that is part of the artifact.** Probe order is
+        // report order, and the R2 acceptance criterion is that the payload
+        // with this one entry removed is byte-identical to the sealed baseline
+        // — which is only well defined while the new entry is the final one.
+        probes.append(try await ReanchorPolicyProbe.run())
 
         let canonicalArtifact = ArtifactRecord(byteCount: try writeTranscript(
             document,
