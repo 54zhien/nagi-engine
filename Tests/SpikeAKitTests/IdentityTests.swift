@@ -556,6 +556,69 @@ final class IdentityTests: XCTestCase {
         XCTAssertTrue(ambiguous.needsReanchor)
     }
 
+    /// **The third shape that produces no candidate, and the only one whose field
+    /// table is empty.**
+    ///
+    /// Its siblings are covered above: several candidates (`.ambiguous`) and none
+    /// resolvable (`.unresolvable`). This one is `ResolutionShape.notExpressible`
+    /// — "the position could not be written out at all" — and no other corpus row
+    /// reaches it, because every other native row draws its `unitID` from a unit
+    /// the fixture has.
+    ///
+    /// **Why the census was not enough.** The census counts rows and buckets; it
+    /// does not fail when a row changes *what it says* without leaving its
+    /// bucket. This very shape has been silently wrong before — it used to return
+    /// a validator verdict, which is what hid the path. `tasks/lessons.md` records
+    /// the same gap for `native-path-anchored`, which stayed mis-judged because
+    /// nothing asserted on it.
+    ///
+    /// The case is read back from the corpus instead of rebuilt here, so the row
+    /// and this test cannot drift apart.
+    func testAPositionInAUnitThatNoLongerExistsIsNotExpressible() throws {
+        let document = try document()
+        let testCase = try XCTUnwrap(
+            SpikeACases.nativeCases(document)
+                .first { $0.label == "native-position-in-a-unit-that-no-longer-exists" }
+        )
+
+        // **The premise, asserted rather than assumed.** The corpus names this
+        // unit instead of looking it up, so the day a unit of that name exists
+        // the row would quietly become a different measurement.
+        XCTAssertNil(
+            document.unit(withID: testCase.position.unitID),
+            "this case is only about a missing unit while that unit is missing"
+        )
+
+        let trip = try RoundTripHarness.nativeToLocatorToNative(
+            testCase.position,
+            in: document,
+            label: testCase.label
+        )
+
+        // No candidate, so a validator has nothing to confirm.
+        XCTAssertFalse(trip.needsValidator)
+        // No position either, so it goes to ReanchorService.
+        XCTAssertTrue(trip.needsReanchor)
+
+        // **No field table at all**, which is what separates this shape from
+        // `.unresolvable`. `locator(from:)` returned nil before a single field
+        // could be stated, so there is no fate to report — not an empty answer,
+        // but no answer. Reading this as "nothing was lost" is how a resolution
+        // failure came to be reported as a clean round trip in an earlier round.
+        XCTAssertTrue(
+            trip.transportResolutions.isEmpty,
+            "a position that could not be written out has no field whose fate it can state"
+        )
+
+        guard case .requiresReanchor(let reason) = trip.outcome else {
+            return XCTFail("expected a reanchor, got \(trip.outcome)")
+        }
+        XCTAssertTrue(
+            reason.contains("could not be expressed"),
+            "the reason should name what happened, not merely that something did: \(reason)"
+        )
+    }
+
     /// **The number written into `locations.progression` is per resource, and
     /// that is not a detail.**
     ///
