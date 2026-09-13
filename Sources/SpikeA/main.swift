@@ -73,7 +73,11 @@ let outputDirectory = parseOutputDirectory()
 do {
     try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
 
-    let report = try SpikeA.run(
+    // `await` because `SpikeA.run` is `async` since R2: the reanchor-policy
+    // probe calls into `ReanchorService`, whose production boundary has to be
+    // async. Top-level `await` in `main.swift` is Swift 5.5+; whether this
+    // exact spot compiles is for CI to say, since there is no toolchain here.
+    let report = try await SpikeA.run(
         outputDirectory: outputDirectory,
         expectedFingerprint: parseExpectedFingerprint()
     )
