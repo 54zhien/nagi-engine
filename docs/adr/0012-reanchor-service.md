@@ -98,6 +98,52 @@ ADR-0004 把本层的性质写作「模糊重锚：`exact` + `prefix` + `suffix`
 
 这条之所以可执行：**现有报告没有顶层的 probe 总数**，每个 probe 自己的 `numbers` 留在各自条目里。所以删掉末尾一项之后，其余字节不会因为任何聚合而变动。
 
+> ⚠️ **一个实测踩到的坑，写在这里防下一次误用。** 上面说的是 `SpikeAReport.canonicalPayload()` 的编码，**不是 `SpikeAReport.write(to:)` 写出的 `spike-a.json`** —— 后者**额外包含 `artifacts` 与 `determinism`** 两个顶层字段。若从写盘 JSON 重建 canonical payload，**必须先排除这两个字段**，再执行 probe 删除与 sorted-keys 重编码。
+>
+> 漏掉这一步的后果不是「比较麻烦」，而是**在本次新增 probe 的新旧投影比较中，该判据必然不能通过**：`determinism.fingerprint` 覆盖整个 canonical payload，新增一条 probe 它就该变；把它算进投影，就等于要求一个必然为假的相等。第一次执行这条判据时正是这样失败的（差在第 415 字符处的那个字段），而问题不在判据、在取错了来源。
+
+## 实测（2026-09-13）
+
+契约、实现、测量分三次独立提交；**R0 为纯文档**，R1 与 R2 分别经过独立 CI 验证 —— 分开是为了让**实现变化与测量变化的验证结果更容易归因**。
+
+| 段 | commit | 内容 |
+|---|---|---|
+| R0 | `fef22ca` | 本 ADR 与执行单（纯文档） |
+| R1 | `3a0c82a` | `Anchor` / `AnchorValidator` / `ReanchorService` + 20 条契约测试 |
+| R2 | `961cd2c` | `reanchor-policy` probe（六例）+ 报告接线 |
+
+R1 的 CI（run `34753766411`）与 R2 的 CI（run `34755702082`）都是两个 Gate 全绿、**163 tests / 0 failures**（R1 之后即为 163，R2 未新增测试）。
+
+**`reanchor-policy` 的读数**
+
+```
+cases=6   relocated=3   ambiguous=1   notFound=2
+methodOriginalPosition=1   methodUniqueExactQuote=1   methodQuoteContext=1
+reasonEmptyQuote=1         reasonExactTextMissing=1
+evidenceCount=1            mismatches=0            →  measured / yes
+```
+
+六例各自走到一个判别叶子，所以 `evidenceCount = 1` —— 它取的是**最稀缺的那个叶子**，不是用例数。将来语料若不再触达某一支，读数会变成 `inconclusive`，而不是一个「没什么可失败的 `yes`」。
+
+**三进程指纹**（同一 run 内 a-run1/2/3 一致）
+
+```
+Spike A   096450057cea34d63dcbc01e1245e14a989af90d6f004b32ccb08cfe94d84b05
+```
+
+**它不要求等于封版基线的 `291c830c…`** —— 新增一条 probe 就改变了 canonical payload，指纹理应随之改变。要求它相等反而是错的判据。要相等的是下面这条投影。
+
+**旧 payload 投影**（按上文定义执行，两侧同一 sorted-keys 编码）
+
+```
+trimmed   622a3e38b0282ff7a3df62f0133f9a59a398c4ba3ea1756f2c36845be1b50450
+baseline  622a3e38b0282ff7a3df62f0133f9a59a398c4ba3ea1756f2c36845be1b50450
+```
+
+逐字节相同。**去掉新 probe 之后，旧 payload 一个字都没动。**
+
+**同时逐字节未变的**：`canonical-text.txt`（新旧相同）、`run1/spike-b.json`、`run1/spike-b.fingerprint`（Spike B 完全未受影响）。
+
 ## Consequences
 
 - 跨来源恢复（同一本书来自不同站点、`id` 全部不同）由本层负责，**不是** `NodeID` 分层方案的职责 —— ADR-0003 的稳定性承诺不覆盖内容编辑过的 artifact。

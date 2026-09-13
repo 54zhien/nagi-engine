@@ -14,6 +14,18 @@
 
 答案以**探针（probe）**形式落盘：每个探针带自己的问题、执行状态、结论和数字，跑一次留一份可比对的指纹。结论是"否"也算结论 —— 它是对被测对象的陈述，不是构建失败。
 
+## Spike A 之后：ReanchorService
+
+Spike A 的结论之一是「没有一行能靠结构自证身份」。顺着这条结论往下一步是**重锚**：原锚失效之后，凭内容能不能重新找到它。它已实现、已被测量，契约见 **ADR-0012**。
+
+三条边界值得在这里说明，因为它们都是**容易被想当然**的地方：
+
+- **不做近似匹配。** 匹配是**逐 UTF-16 code unit 的字面相等**：没有编辑距离、没有分词、没有标点宽松、没有 Unicode 归一化。ADR-0004 管这一层叫「模糊重锚」，那里的「模糊」**仅指不依赖旧的精确位置**。
+- **绝不选「最近」。** 多个候选分不开时返回 `ambiguous` 并给出全部候选，而不是挑一个最近的 —— 猜中的位置看起来和找到的一样，而用户不会被告知区别。
+- **它不是生产件。** 既**不是 `DocumentStore`**，也**不是索引器**：本轮用已物化的文档线性扫描 reading order，只验证**语义与确定性**。`async throws` 的签名是为将来留的生产边界，不是现在的实现。
+
+实测读数：六例全部经公开 API 真实调用，`cases=6 / relocated=3 / ambiguous=1 / notFound=2`，六个判别叶子各被触达一次，`mismatches=0`。
+
 ## 适合谁看
 
 - 想了解「位置身份 / 分页 / 排版后端」这类阅读引擎核心问题**怎么被实证、而不是被论证**的人
@@ -51,10 +63,12 @@ swift run spike-b   # Spike B：排版后端能力
 
 | 文件 | 用途 |
 |---|---|
-| `spike-a.json` / `spike-b.json` | **机器门禁** —— 量化过、不含运行元数据，可比对 |
-| `spike-*.fingerprint` | 规范载荷哈希，跨运行比对用 |
+| `spike-a.json` / `spike-b.json` | **完整报告** —— 无时间戳、run ID 和输出路径，但除 canonical payload 外还含 `artifacts` 与 `determinism`；**不能直接作为跨进程字节门禁** |
+| `spike-*.fingerprint` | **真正的跨进程门禁** —— `canonicalPayload()` 的规范哈希；`canonicalPayload()` 是完整报告的**投影** |
 | `canonical-text.txt` | **人审** —— 那些偏移所索引的文本本身（Spike A） |
 | `page-0.png` · `vertical-column-0.png` · `ruby.png` | **人审** —— 横排页 / 竖排栏 / 注音行盒（Spike B） |
+
+**`.json` 与 `.fingerprint` 不是同一件东西，这点会咬人。** 跨进程一致性由指纹保证；要拿写盘 JSON 重建 `canonicalPayload()`（例如做「去掉某条 probe 后旧读数是否未动」的投影比较），**必须先排除 `artifacts` 与 `determinism`** —— `determinism.fingerprint` 覆盖整个 payload，新增一条 probe 它就该变，把它算进投影，这条判据在本次这种比较里必然不能通过。ADR-0012 记录了这次实测踩到的原委。
 
 ## 一个刻意的设计：探针不构成失败
 
@@ -69,13 +83,13 @@ CI 只有两种失败：**抛出的错误**（真缺陷）和**指纹不一致**
 ```
 Sources/
   SpikeA/        位置身份 spike 的可执行入口
-  SpikeAKit/     Locator 往返、canonical text、身份与进度度量
+  SpikeAKit/     Locator 往返、canonical text、身份与进度度量、重锚（Anchor/Validator/ReanchorService）
   SpikeB/        排版后端 spike 的可执行入口
   SpikeKit/      探针与报告原语（Quantize / SHA256 / ProbeOutcome / ReportIO…）
                  + 内置字体 NagiRounded-Regular.ttf
 Tests/
   SpikeAKitTests/  ·  SpikeKitTests/
-docs/adr/        0001–0011，每个决定一份
+docs/adr/        0001–0012，每个决定一份
 CONTEXT.md       词汇表 —— 只定义术语的含义与边界
 tasks/           进行中的计划与经验
 ```
@@ -99,6 +113,7 @@ tasks/           进行中的计划与经验
 | 0009 | 出版进度模型 |
 | 0010 | 兼容渲染器 |
 | 0011 | 渲染与黄金验证 |
+| 0012 | 重锚服务（Reanchor Service） |
 
 术语的**边界**（什么算、什么不算）以 `CONTEXT.md` 为准 —— 那里每个词都写了 `_Avoid_`，说明它**不是**什么。
 
