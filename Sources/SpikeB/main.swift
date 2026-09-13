@@ -60,10 +60,10 @@ func line(_ character: Character = "-", count: Int = 78) -> String {
     String(repeating: character, count: count)
 }
 
-/// Left-pads to a fixed column so the CI log reads as a table.
-func pad(_ text: String, _ width: Int) -> String {
-    text.count >= width ? text : text + String(repeating: " ", count: width - text.count)
-}
+// `terminalColumn` and `columnWidth` live in `SpikeKit/TerminalColumns.swift`,
+// shared with Spike A. This file used to carry its own copy, whose doc comment
+// said "left-pads" while the code right-pads — and whose declared widths let
+// three probe names run into the column after them.
 
 func fixed(_ value: Double, _ decimals: Int = 3) -> String {
     String(format: "%.\(decimals)f", value)
@@ -102,14 +102,24 @@ do {
     print("")
 
     print(line())
-    print(pad("PROBE", 24) + pad("EXECUTION", 14) + pad("FINDING", 10) + "DETAIL")
+    // Measured, not declared. Three of this table's seven probe names are at or
+    // over the 24 written here before, and a name exactly as long as its column
+    // gets no separating space from `pad` — the CI log read
+    // `kinsoku-baseline-behaviorMEASURED`.
+    let probeNameWidth = columnWidth(24, report.probes.map(\.name) + ["PROBE"])
+    print(
+        terminalColumn("PROBE", probeNameWidth)
+            + terminalColumn("EXECUTION", 14)
+            + terminalColumn("FINDING", 10)
+            + "DETAIL"
+    )
     print(line())
 
     for probe in report.probes {
         print(
-            pad(probe.name, 24)
-                + pad(marker(for: probe.execution), 14)
-                + pad(findingLabel(probe.finding), 10)
+            terminalColumn(probe.name, probeNameWidth)
+                + terminalColumn(marker(for: probe.execution), 14)
+                + terminalColumn(findingLabel(probe.finding), 10)
         )
         print("    Q  \(probe.question)")
         print("    A  \(probe.detail)")
@@ -136,19 +146,27 @@ do {
     print(line())
     print("ARTIFACTS")
     print(line())
-    print(pad("page-0.png", 26) + "\(report.artifacts.pagePNG.byteCount) bytes")
-    print(pad("vertical-column-0.png", 26) + "\(report.artifacts.verticalColumnPNG.byteCount) bytes")
-    print(pad("ruby.png", 26) + "\(report.artifacts.rubyPNG.byteCount) bytes")
+    print(terminalColumn("page-0.png", 26) + "\(report.artifacts.pagePNG.byteCount) bytes")
+    print(terminalColumn("vertical-column-0.png", 26) + "\(report.artifacts.verticalColumnPNG.byteCount) bytes")
+    print(terminalColumn("ruby.png", 26) + "\(report.artifacts.rubyPNG.byteCount) bytes")
     print("")
 
     print(line())
     print("LAYOUTS")
     print(line())
+    // Measured for the same reason the probe table is: these cells come from the
+    // report, so a longer label or a three-digit count would collide. The
+    // artifacts table above keeps its constants on purpose — its cells are
+    // literals written in the same `print`, so measuring them would only
+    // reproduce the constant printed beside them.
+    let layoutLabelWidth = columnWidth(18, report.layouts.map(\.label))
+    let lineCountWidth = columnWidth(12, report.layouts.map { "\($0.lineCount) lines" })
+    let pageCountWidth = columnWidth(12, report.layouts.map { "\($0.pageCount) pages" })
     for layout in report.layouts {
         print(
-            pad(layout.label, 18)
-                + pad("\(layout.lineCount) lines", 12)
-                + pad("\(layout.pageCount) pages", 12)
+            terminalColumn(layout.label, layoutLabelWidth)
+                + terminalColumn("\(layout.lineCount) lines", lineCountWidth)
+                + terminalColumn("\(layout.pageCount) pages", pageCountWidth)
                 + "measure=\(fixed(layout.measureWidth, 0))pt  page=\(fixed(layout.pageHeight, 0))pt"
         )
     }

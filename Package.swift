@@ -36,13 +36,17 @@ let package = Package(
         // a name that will need splitting the day a third spike appears.
         // Deferred on purpose: Spike B is sealed, and re-partitioning it to
         // tidy a name is not worth the churn yet.
+        //
+        // `TerminalColumns.swift` is shared on the same terms.
         .target(
             name: "SpikeAKit",
             dependencies: ["SpikeKit"]
         ),
         .executableTarget(
             name: "SpikeA",
-            dependencies: ["SpikeAKit"]
+            // Named because `main.swift` imports it; until now it reached
+            // `SpikeKit` through the package's transitive search paths.
+            dependencies: ["SpikeAKit", "SpikeKit"]
         ),
         .executableTarget(
             name: "SpikeB",
