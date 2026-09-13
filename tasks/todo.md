@@ -1,5 +1,27 @@
 # TODO
 
+## 已完成：Phase 3 —— ReanchorService 实现与测量（2026-09-13）
+
+**契约、实现、测量分三次独立提交；R0 为纯文档，R1 与 R2 分别经过独立 CI 验证** —— 分开是为了让**实现变化与测量变化的验证结果更容易归因**，不和别的改动混在一起。
+
+| 段 | commit | 内容 | CI |
+|---|---|---|---|
+| R0 | `fef22ca` | ADR-0012 与执行单（纯文档） | — |
+| R1 | `3a0c82a` | `Anchor` / `AnchorValidator` / `ReanchorService` + **20 条**契约测试 | run `34753766411` 两 gate 全绿 |
+| R2 | `961cd2c` | `reanchor-policy` probe（六例）+ 报告接线 | run `34755702082` 两 gate 全绿 |
+
+两次 CI 均为 **163 tests / 0 failures**（R1 之后即为 163，R2 未新增测试）。
+
+**`reanchor-policy` 读数**：`cases=6 relocated=3 ambiguous=1 notFound=2`、`methodOriginalPosition/methodUniqueExactQuote/methodQuoteContext` 各 1、`reasonEmptyQuote/reasonExactTextMissing` 各 1、`evidenceCount=1`、`mismatches=0` → `measured / yes`。`evidenceCount` 取的是**最稀缺的判别叶子**而非用例数 —— 将来某一支不再被触达，读数会变 `inconclusive` 而不是一个「没什么可失败的 yes」。
+
+**artifact 验收**：新 run 三个 Spike A 指纹一致（`09645005…`，与封版基线 `291c830c…` **不同是预期的**）；`canonical-text.txt`、`spike-b.json`、`spike-b.fingerprint` 对基线**逐字节未变**；**旧 payload 投影逐字节相同**（两侧 `622a3e38…`）。
+
+**实测踩到并记入 ADR-0012 的一处陷阱**：写盘的 `spike-a.json` **不等于** `canonicalPayload()` —— 它多含 `artifacts` 与 `determinism`，而后者的 `fingerprint` 覆盖整个 payload、新增 probe 就该变。**在本次新增 probe 的新旧投影比较中**，拿写盘 JSON 直接比，该判据必然不能通过。
+
+> ⚠️ **以下历史段落里的「`ReanchorService` 尚未实现 / 只判定需要它」等表述，是当时那一轮的记录，保留不改。** 它们已被本段取代 —— 重锚现在已实现、已被测量，契约见 ADR-0012。
+
+---
+
 ## 已完成：Phase 2.5 —— compare / Resolution / outcome reducer 收口（两次推送，读数见下）
 
 **顺序已由用户拍板（2026-09-12）：先修测量仪器，再写恢复算法。**
