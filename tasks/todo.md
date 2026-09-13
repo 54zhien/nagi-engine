@@ -1,6 +1,6 @@
 # TODO
 
-## 下一阶段：Phase 2.5 —— compare / Resolution / outcome reducer 收口
+## 已完成：Phase 2.5 —— compare / Resolution / outcome reducer 收口（两次推送，读数见下）
 
 **顺序已由用户拍板（2026-09-12）：先修测量仪器，再写恢复算法。**
 
@@ -235,9 +235,11 @@ run 2  progress-layout-independence▪MEASURED                                  
 
 #### 本轮顺带修掉的、计划原文没记的两列
 
-#### 本轮顺带修掉的、计划原文没记的两列
+原文只记了字段表的 `original` / `resolved` 两列溢出。逐列量过之后发现**溢出的有三列**：`trip.name` 声明 52 而最长的用例名超出它、`probe.name` 声明 26 而 `progress-layout-independence` 是 **28**。这两列**既存且从未被记录**。封版前一并修掉，否则封的是个已知有裂的表。
 
-原文只记了字段表的 `original` / `resolved` 两列溢出。逐列量过之后发现**溢出的有三列**：`trip.name` 声明 52 而 `native-id-anchored-at-element-start` 是 **60**（挤掉同行 outcome 词 8 列）、`probe.name` 声明 26 而 `progress-layout-independence` 是 **28**。这两列**既存且从未被记录**。封版前一并修掉，否则封的是个已知有裂的表。
+> ⚠️ **本段第一版把三个长度数字写错了，由两个独立审查代理各自抓到。** 我写的 `native-id-anchored-at-element-start` = 60（实际 **59**）、位移 8 列（实际 **7**）、`body > p:nth-child(3)` = 24（实际 **21**）。这正是本仓 `lessons.md` 那条「不许凭记忆写常数、要写不变量」—— 而它发生在一次主旨是「宽度要量、不要声明」的改动里。代码注释已改成不引用任何长度；本记录按实测更正，不再写。
+
+
 
 改法是由内容量宽（`max(声明下限, 该列最宽值)`），不是给常数换个更大的数 —— 换常数只是把悬崖挪个位置；截断则会把 `body > p:nth-child(3)` 削成读者正需要的那半个选择器。
 
