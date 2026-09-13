@@ -32,7 +32,7 @@ jobs:
     name: Gate 1 — build and unit tests
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Toolchain
         run: swift --version
@@ -55,7 +55,7 @@ jobs:
       # while reporting the step as a success.
       OUT: spike-artifacts
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Baseline run
         run: swift run spike-b --out "$OUT/run1"
@@ -90,9 +90,9 @@ jobs:
 
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
-          name: spike-b-artifacts
+          name: spike-artifacts
           path: ${{ env.OUT }}/
           # `error`, not `warn`: an upload that quietly finds nothing is the
           # same failure as a review image that quietly was not written, and
