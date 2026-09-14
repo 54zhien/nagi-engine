@@ -1,5 +1,26 @@
 # TODO
 
+## Phase 4 D0/D1 —— 文档序键定案与文档收口（2026-09-13）
+
+**结论**：序号 = **(单元在 manifest reading order 中的序号, 该单元 canonical primary text 内的绝对 `utf16Offset`)**。不加字段、不改 `NodeID`、不给 `NativePosition` 加 `Comparable`、`NodeID` 不参与排序。契约见 **ADR-0003**；执行计划见 `tasks/document-order-contract-plan.md`。
+
+**D0-diff 经 Codex 三轮复审（v2 → v3 → v4）后放行。** 六份契约文件：
+
+| 文件 | 内容 |
+|---|---|
+| `docs/adr/0003-identity-scheme.md` | 文档序键整段：定案、原 provisional 判据的三处失准、`DocumentUnit.id` 唯一性定案、接口形状、并列与边界语义 |
+| `docs/adr/0004-position-and-anchor-model.md` | 把「若采用路径 2 则需增加 `documentOrder`」这个条件式方案替换为当前定案 |
+| `docs/adr/0005-primary-text-stream.md` | **偏移语义统一**：offset 是 unit-local 的绝对偏移（绝对是对节点而言），不是 publication-global；那条流由各单元文本按 reading order 直接拼接、不插合成分隔符 |
+| `CONTEXT.md` | 「位置」下新增 **Document Order** 术语；删掉 `## 未决` 的文档序键条目（不写「（空）」）；Primary Text Stream 定义收紧到同一语义 |
+| `Sources/SpikeAKit/NodeIdentity.swift` | **只改注释**：它原来引的是 ADR-0003 里那份「三条可选路径」编号表，定案后该表不再存在，出处改挂阶梯第 2 级 |
+| `tasks/document-order-contract-plan.md` | 执行计划（新文件） |
+
+**必须与 `tasks/lessons.md` 分开提交**（Codex 裁定：lessons 是本仓「每次被纠正后立即追加」的既定动作，不属于 D0 契约扩项）。
+
+**D0 定案与 D1 文档收口（ADR-0008 那句阻塞 + 本节）均已完成。** 本仓不再为文档序键做任何实现改动，下一步是建正式引擎仓 —— `DocumentManifest` 的 unit-index 查询 API 与 `DocumentOrderKey` 投影是它的**第一个真实纵切**，由 PageMap 消费（形状见 `tasks/document-order-contract-plan.md`）。
+
+> ⚠️ **本文件里以下各处是 Spike A 各轮当时的记录，保留不改**：第一轮的「`NativePosition` 先不带 `documentOrder`」，以及此后三轮各自那条把「ADR-0003 的文档序键」列为未做 / 未触及的收尾项。**它们全部已被本段取代** —— 文档序键已于 2026-09-13 定案。按本仓约定，历史段落不逐处篡改，只在这里统一说明。
+
 ## 已完成：Phase 3 —— ReanchorService 实现与测量（2026-09-13）
 
 **契约、实现、测量分三次独立提交；R0 为纯文档，R1 与 R2 分别经过独立 CI 验证** —— 分开是为了让**实现变化与测量变化的验证结果更容易归因**，不和别的改动混在一起。

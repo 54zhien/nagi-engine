@@ -48,4 +48,4 @@ enum FlowBoundaryPolicy { case hard, continuous }
 - 持久化缓存键必须包含：`DocumentID` + `identitySchemeVersion` + `documentSchemaVersion` + `LayoutSignature` + `layoutAlgorithmVersion`。
 - 任何影响分页的设置必须进入 `LayoutSignature`，**包括字体资源本身的指纹** —— 捆绑字体在 app 更新中换了文件，分页会变，旧 PageMap 即错误。
 - PageMap 在每个 LayoutSignature 下都不同，因此持久化对它而言只是「同设备同配置的冷启动加速」，不是通用缓存。
-- 若 ADR-0003 的文档序键未定，`PageMap` 的二分查找路径无法确定。
+- **查找路径是两层的**：先按单元序号定位单元，再在该单元内按偏移定位页。这个结构是 v1 的 hard pagination boundary（页不跨 unit）的直接推论 —— 页落在一个单元内，所以「哪个单元」与「单元内哪里」可以分两步问。ADR-0003 的文档序键已定案（2026-09-13）：序号 = 单元在 reading order 中的序号 + 单元内绝对 `utf16Offset`；该序键只在同一份不可变 manifest snapshot 内可比较、不持久化。
