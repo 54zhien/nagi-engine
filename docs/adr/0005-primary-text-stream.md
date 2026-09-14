@@ -6,6 +6,10 @@
 
 存在**一条** primary canonical text stream，所有 Native Position 的 UTF-16 偏移都以它为数轴。
 
+**偏移是 unit-local 的，不是 publication-global（2026-09-13 补记）。** 上面那条流是**逻辑上的一条**：它由各 `DocumentUnit` 的 unit-local primary text 按 reading order **直接拼接**而成，**不插入任何合成分隔符**（不插 `\n`，也不插占位）。而 `NativePosition.utf16Offset` 是它**所在 unit segment 内的绝对偏移** —— 「绝对」是对**节点**说的（不相对于元素起点），不是对**全书**说的。出版级坐标是由它**导出**的 metric（按 reading order 的前缀和），不是持久化的位置字段。
+
+这一点不能两读：文档序键取「单元序号 + 单元内偏移」，而**不**取一个全书偏移，正是这条的直接后果（ADR-0003）。
+
 **不占主数轴的**：`<rt>` 与 `<rp>`（注音）、被 CSS 折叠的空白、生成内容。
 
 ```

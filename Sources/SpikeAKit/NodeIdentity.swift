@@ -12,10 +12,11 @@ import Foundation
 /// needed to measure what Spike A measures, because the fixture is built to show
 /// where these two rungs run out — which is the evidence ADR-0003 needs.
 ///
-/// A path is a legitimate rung rather than a disguised array index: ADR-0003
-/// lists the path shape as candidate solution 1 ("字典序比较 O(depth)，无需物化").
-/// What the ADR forbids is using *parse order* as identity; a path is a
-/// structural position in the source, and it is stable for a given artifact.
+/// A path is a legitimate rung rather than a disguised array index: it **is**
+/// ladder rung 2 in ADR-0003 ("Source-local stable anchor（DOM path / XML path /
+/// TXT source range）"). What the ADR forbids is using *parse order* as
+/// identity; a path is a structural position in the source, and it is stable
+/// for a given artifact.
 public enum NodeID: Codable, Sendable, Hashable {
     case explicitID(String)
     case path([UInt32])

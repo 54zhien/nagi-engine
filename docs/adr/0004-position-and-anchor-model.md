@@ -44,7 +44,7 @@ Quote/Context Reanchor → 解决跨版本、跨来源恢复
 
 - 只有 `.storage` 策略是**文档级不变量**；`.caret` / `.shapingCluster` / `.lineBreak` 是请求时策略。类型上不应混为一谈。
 - `AnchorValidator` 与 `ReanchorService` 需要读取文本，因此在 `DocumentStore` 惰性物化之后**它们是 async 的**。
-- 若 ADR-0003 的文档序键采用路径 2，`NativePosition` 需增加 `documentOrder` 字段。
+- ADR-0003 的文档序键已定案（2026-09-13）：次序 = **单元在 reading order 中的序号 + 单元内绝对 `utf16Offset`**，两个分量都能从 `NativePosition` 与当前 manifest 联合取得。因此 `NativePosition` **不增加** `documentOrder` 之类的字段，形状不变。
 
 **Spike A 的实测（2026-09-12）**
 
