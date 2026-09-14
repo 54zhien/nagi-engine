@@ -16,6 +16,11 @@ Nagi 排版内部的精确坐标 —— 内容单元 + 节点 + canonical primar
 服务于文字选择、字形命中、批注精确区间、分页边界。
 _Avoid_: offset, 光标位置, DocumentPosition
 
+**Document Order**:
+两个 Native Position 在文档中的先后 —— 单元在 Document Manifest 的 reading order 中的序号，再是单元内 canonical primary text 的绝对 UTF-16 偏移。
+它是**文档的函数**，随 reading order 重排而变，不是位置自带的常量，也不持久化。
+_Avoid_: 页码, 全局偏移
+
 **Location Bridge**:
 Publication Position 与 Native Position 之间的双向转换。它是唯一被允许同时认识这两个坐标系的组件。
 _Avoid_: 转换器, Adapter, Mapper
@@ -74,7 +79,8 @@ _Avoid_: 缓存, 数据库
 _Avoid_: DocumentFragment（与 DOM 同名，勿混用）, 片段
 
 **Primary Text Stream**:
-所有 Native Position 偏移所依据的那一条规范文本。
+所有 Native Position 偏移所依据的那一条规范文本 —— 由各单元自己的规范文本按 reading order 直接拼接而成。
+偏移在**它所在单元的那一段内**是绝对的；出版级坐标是由它**导出**的 metric，不是位置。
 注音（`<rt>` / `<rp>`）与被折叠的空白**不占**它的数轴。
 _Avoid_: 正文, raw text, 原文
 
@@ -115,7 +121,3 @@ _Avoid_: 检查, Feature detection
 ## 命名待定
 
 `Document Manifest` 与 Readium 的 OPF `Manifest` 同义不同物；`Content Fragment` 与 DOM / SwiftSoup 的 `DocumentFragment` 同名。Swift 无命名空间，同一 target 内会强制到处写限定名。**当前用 `Manifest` / `Content Fragment` 规避，最终名称待定。** 见 ADR-0002。
-
-## 未决
-
-- **文档序键**：`Native Position` 是否需要携带一个内容决定的文档序，使 Page Map 的查找与搜索结果排序无需物化正文即可比较两个位置。三条候选路径见 ADR-0003，须在实现 Document Manifest 前定。
