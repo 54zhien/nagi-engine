@@ -102,7 +102,8 @@ struct ByteSlice {
 
 public enum FontTables {
     public static func parse(_ data: Data) -> FontTableReport? {
-        let file = ByteSlice(data: data, range: 0..<data.count)
+        // Data slices retain their parent's indices; offsets stay relative to this window.
+        let file = ByteSlice(data: data, range: data.startIndex..<data.endIndex)
         guard file.count >= 12, let version = try? file.readUInt32(at: 0) else { return nil }
 
         let versionString: String
