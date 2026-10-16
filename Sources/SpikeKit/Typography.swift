@@ -174,8 +174,11 @@ public enum TextLayout {
         }
         let string = NSMutableAttributedString(string: input.text, attributes: attributes)
 
-        if let ruby = input.ruby, ruby.range.location >= 0,
-           ruby.range.location + ruby.range.length <= string.length {
+        if let ruby = input.ruby,
+           ruby.range.location >= 0,
+           ruby.range.length >= 0,
+           ruby.range.location <= string.length,
+           ruby.range.length <= string.length - ruby.range.location {
             // CTRubyAnnotationCreateWithAttributes takes no size-factor
             // argument — it travels in the attributes dictionary, keyed by
             // kCTRubyAnnotationSizeFactorAttributeName. (The sizeFactor
