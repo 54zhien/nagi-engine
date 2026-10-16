@@ -189,6 +189,38 @@ final class FontTableTests: XCTestCase {
         }
     }
 
+    // MARK: - Data slices
+
+    /// Copying this slice into a fresh Data would reset its indices and hide
+    /// the input shape this regression is meant to exercise.
+    func testParsesDataSliceWithNonZeroStartIndex() throws {
+        let font = makeFont(tables: [("GSUB", gsubTable(features: ["vert", "halt"]))])
+        let slice = sliceWithNonZeroStart(of: font, keeping: font.count)
+
+        XCTAssertNotEqual(slice.startIndex, 0, "fixture must keep a non-zero startIndex")
+        XCTAssertEqual(slice.count, font.count)
+        XCTAssertTrue(slice.elementsEqual(font))
+
+        let report = try XCTUnwrap(FontTables.parse(slice))
+        XCTAssertEqual(report.sfntVersion, "1.0")
+        XCTAssertEqual(report.tables, ["GSUB"])
+        XCTAssertEqual(report.gsubFeatures, ["halt", "vert"])
+        XCTAssertEqual(report.gposFeatures, [])
+    }
+
+    /// Bytes after the slice still contain the rest of the real directory;
+    /// only respecting the slice's own end can reject this truncated input.
+    func testTruncatedDataSliceWithNonZeroStartIndexIsRejected() {
+        let font = makeFont(tables: [("GSUB", gsubTable(features: ["vert", "halt"]))])
+        let truncatedLength = 12 + 16 - 1
+        XCTAssertGreaterThan(font.count, truncatedLength)
+
+        let slice = sliceWithNonZeroStart(of: font, keeping: truncatedLength)
+        XCTAssertNotEqual(slice.startIndex, 0, "fixture must keep a non-zero startIndex")
+        XCTAssertEqual(slice.count, truncatedLength)
+        XCTAssertNil(FontTables.parse(slice))
+    }
+
     // MARK: - The font we actually ship
 
     /// Pinned the same way the corpus is: glyph metrics are only comparable
@@ -231,6 +263,15 @@ final class FontTableTests: XCTestCase {
     }
 
     // MARK: - Synthetic font assembly
+
+    private func sliceWithNonZeroStart(of font: Data, keeping length: Int) -> Data {
+        precondition(length >= 0 && length <= font.count)
+        let prefixLength = 7
+        var buffer = Data(repeating: 0xA5, count: prefixLength)
+        buffer.append(font)
+        buffer.append(Data(repeating: 0x5A, count: 13))
+        return buffer[prefixLength..<(prefixLength + length)]
+    }
 
     /// Minimal sfnt: 12-byte header, one 16-byte record per table, then bodies.
     /// Checksums are left at zero — the parser does not verify them, and a
