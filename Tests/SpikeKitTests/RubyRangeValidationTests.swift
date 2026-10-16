@@ -18,6 +18,10 @@ final class RubyRangeValidationTests: XCTestCase {
         assertRubyIgnored(for: NSRange(location: 1, length: Int.max))
     }
 
+    func testNegativeLengthIsIgnored() {
+        assertRubyIgnored(for: NSRange(location: 1, length: -1))
+    }
+
     func testRangePastEndIsIgnored() {
         let length = text.utf16.count
         XCTAssertEqual(length, 4)
